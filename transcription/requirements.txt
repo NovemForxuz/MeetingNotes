@@ -1,0 +1,10 @@
+# Local, offline transcription for MeetingNotes.
+# openai-whisper pulls in torch automatically. NOTE: on Windows, the default
+# PyPI torch wheel is CPU-only, even with an NVIDIA GPU present. For GPU
+# acceleration, install the CUDA build of torch FIRST (see README.md), then
+# run `pip install -r requirements.txt`.
+openai-whisper
+
+# NOTE: ffmpeg is NOT a Python package and is not installed by pip.
+# Whisper shells out to the ffmpeg binary to decode audio, so it must be
+# installed separately and available on your PATH. See README.md.
