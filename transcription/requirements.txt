@@ -9,7 +9,7 @@ torch
 # Whisper shells out to the ffmpeg binary to decode audio, so it must be
 # installed separately and available on your PATH. See README.md.
 
-# Summarization (summarize.py / pipeline.py) — calls the Anthropic Claude
-# API, so this part is NOT offline and requires an ANTHROPIC_API_KEY.
-anthropic
+# Summarization (summarize.py / pipeline.py) — calls the OpenAI API, so
+# this part is NOT offline and requires an OPENAI_API_KEY.
+openai
 python-dotenv

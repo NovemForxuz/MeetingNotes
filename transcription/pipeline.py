@@ -3,7 +3,7 @@
 pipeline.py — chains transcribe.py + summarize.py into one command.
 
 Discord audio file -> local Whisper transcript -> structured meeting notes
-(via the Claude API), end to end. transcribe.py and summarize.py both still
+(via the OpenAI API), end to end. transcribe.py and summarize.py both still
 work standalone; this just calls their reusable functions in sequence so you
 don't have to run two commands by hand.
 
@@ -11,7 +11,7 @@ Usage:
     python pipeline.py path\to\recording.flac
     python pipeline.py path\to\recording.flac --model small --language en --initial-prompt "Docker, Git, MVP"
     python pipeline.py path\to\recording.flac --skip-summary
-    python pipeline.py path\to\recording.flac --claude-model claude-sonnet-5
+    python pipeline.py path\to\recording.flac --summary-model gpt-4o
 
 Output (both saved under ./output/):
     - <input filename stem>.txt        (transcript, from transcribe.py)
@@ -29,7 +29,7 @@ import transcribe
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Transcribe an audio file locally, then summarize it into structured "
-        "meeting notes via the Claude API."
+        "meeting notes via the OpenAI API."
     )
     parser.add_argument(
         "audio_path",
@@ -56,15 +56,15 @@ def parse_args() -> argparse.Namespace:
         help="Vocabulary hint text passed to Whisper to improve jargon recognition.",
     )
     parser.add_argument(
-        "--claude-model",
+        "--summary-model",
         type=str,
         default=summarize.DEFAULT_MODEL,
-        help=f"Claude model for the summarization step (default: {summarize.DEFAULT_MODEL}).",
+        help=f"OpenAI model for the summarization step (default: {summarize.DEFAULT_MODEL}).",
     )
     parser.add_argument(
         "--skip-summary",
         action="store_true",
-        help="Only run transcription; skip the Claude summarization step (e.g. if you don't "
+        help="Only run transcription; skip the OpenAI summarization step (e.g. if you don't "
         "have an API key set up yet).",
     )
     return parser.parse_args()
@@ -89,12 +89,12 @@ def main() -> None:
         return
 
     print("\n" + "=" * 60)
-    print("STEP 2/2: SUMMARIZATION (Claude API, requires network)")
+    print("STEP 2/2: SUMMARIZATION (OpenAI API, requires network)")
     print("=" * 60)
     summary_result = summarize.summarize_and_save(
         transcription_result["transcript"],
         audio_path.stem,
-        model=args.claude_model,
+        model=args.summary_model,
     )
 
     print("\n" + "=" * 60)

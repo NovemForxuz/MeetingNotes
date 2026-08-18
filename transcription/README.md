@@ -6,7 +6,7 @@ into structured meeting notes, in two chained steps.
 | Script | Does what | Offline? |
 |---|---|---|
 | `transcribe.py` | Audio → text transcript, via local [Whisper](https://github.com/openai/whisper) | Yes — fully offline, no API calls |
-| `summarize.py` | Transcript → structured Markdown notes, via the Anthropic Claude API | No — needs network + an API key |
+| `summarize.py` | Transcript → structured Markdown notes, via the OpenAI API | No — needs network + an API key |
 | `pipeline.py` | Runs both of the above in sequence | No (unless `--skip-summary`) |
 
 Each script also works standalone with its own CLI — `pipeline.py` just
@@ -47,12 +47,12 @@ From this `transcription/` folder:
 pip install -r requirements.txt
 ```
 
-This installs `openai-whisper`/`torch` (transcription) and `anthropic`/
+This installs `openai-whisper`/`torch` (transcription) and `openai`/
 `python-dotenv` (summarization). First run of `transcribe.py` will also
 download the selected Whisper model's weights (one-time, cached under
 `~/.cache/whisper`).
 
-### 3. Set up your Anthropic API key (only needed for summarize.py / pipeline.py)
+### 3. Set up your OpenAI API key (only needed for summarize.py / pipeline.py)
 
 Copy `.env.example` to `.env` in this folder and fill in a real key:
 
@@ -61,13 +61,17 @@ copy .env.example .env
 ```
 
 ```
-ANTHROPIC_API_KEY=your-key-here
+OPENAI_API_KEY=your-key-here
 ```
 
-Get a key at https://console.anthropic.com/settings/keys. `.env` is
-gitignored — never commit real keys. `transcribe.py` alone doesn't need
-this; only `summarize.py` and `pipeline.py` (unless run with
-`--skip-summary`) do.
+Get a key at https://platform.openai.com/api-keys. `.env` is gitignored —
+never commit real keys. `transcribe.py` alone doesn't need this; only
+`summarize.py` and `pipeline.py` (unless run with `--skip-summary`) do.
+
+> If you already had a `.env` file from an earlier version of this project
+> with `ANTHROPIC_API_KEY`, rename that variable to `OPENAI_API_KEY` (with a
+> real OpenAI key as the value) — summarization now calls OpenAI, not
+> Anthropic.
 
 ## Usage
 
@@ -120,7 +124,7 @@ Given an existing transcript (e.g. from a previous `transcribe.py` run):
 
 ```bash
 python summarize.py output\recording.txt
-python summarize.py output\recording.txt --model claude-sonnet-5
+python summarize.py output\recording.txt --model gpt-4o
 ```
 
 Produces structured Markdown notes with sections: Summary, Topics Discussed,
@@ -225,9 +229,10 @@ stack trace:
 
 **summarize.py:**
 - missing/misspelled transcript file path, or an empty transcript
-- missing `anthropic` package
-- missing/invalid `ANTHROPIC_API_KEY`
-- Anthropic API errors: auth failure, rate limit, network/connection issue,
-  other API-side errors
+- missing `openai` package
+- missing/invalid `OPENAI_API_KEY`
+- OpenAI API errors: auth failure, rate limit, network/connection issue,
+  model not found (e.g. if `gpt-4o-mini` is renamed/deprecated by the time
+  you read this — pass `--model` with a current one), other API-side errors
 
 `pipeline.py` surfaces whichever of the above happens, from either step.

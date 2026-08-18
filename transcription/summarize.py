@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """
 summarize.py — turn a meeting transcript into structured notes using the
-Anthropic Claude API.
+OpenAI API.
 
 Second step of the MeetingNotes MVP pipeline: transcript (from transcribe.py)
 -> structured meeting notes (Markdown). Requires network access and an
-Anthropic API key — unlike transcribe.py, this step is NOT offline.
+OpenAI API key — unlike transcribe.py, this step is NOT offline.
 
 Usage:
     python summarize.py path\to\transcript.txt
-    python summarize.py path\to\transcript.txt --model claude-sonnet-5
+    python summarize.py path\to\transcript.txt --model gpt-4o
 
-Requires ANTHROPIC_API_KEY to be set, either as an environment variable or
-in a .env file in this folder. See README.md.
+Requires OPENAI_API_KEY to be set, either as an environment variable or in a
+.env file in this folder. See README.md.
+
+Note: model names change over time — if the default below is deprecated by
+the time you read this, pass --model with a current one (check
+https://platform.openai.com/docs/models).
 
 Output:
     - Structured meeting notes (Markdown) printed to console
@@ -30,9 +34,9 @@ try:
 
     load_dotenv()
 except ImportError:
-    pass  # python-dotenv is optional; ANTHROPIC_API_KEY can still be a real env var.
+    pass  # python-dotenv is optional; OPENAI_API_KEY can still be a real env var.
 
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL = "gpt-4o-mini"
 
 SYSTEM_PROMPT = """You are an assistant that turns raw meeting transcripts into clear, \
 structured meeting notes. The transcript comes from local speech-to-text and may \
@@ -64,7 +68,7 @@ Output only the Markdown notes — no preamble, no commentary about the transcri
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate structured meeting notes from a transcript using the Anthropic Claude API."
+        description="Generate structured meeting notes from a transcript using the OpenAI API."
     )
     parser.add_argument(
         "transcript_path",
@@ -75,7 +79,7 @@ def parse_args() -> argparse.Namespace:
         "--model",
         type=str,
         default=DEFAULT_MODEL,
-        help=f"Claude model to use (default: {DEFAULT_MODEL}).",
+        help=f"OpenAI model to use (default: {DEFAULT_MODEL}).",
     )
     return parser.parse_args()
 
@@ -95,29 +99,29 @@ def check_transcript_file(transcript_path: Path) -> str:
     return text
 
 
-def import_anthropic():
+def import_openai():
     try:
-        import anthropic
+        import openai
     except ImportError:
         print(
-            "ERROR: The 'anthropic' package is not installed.\n"
+            "ERROR: The 'openai' package is not installed.\n"
             "Install dependencies with:\n"
             "    pip install -r requirements.txt",
             file=sys.stderr,
         )
         sys.exit(1)
-    return anthropic
+    return openai
 
 
 def get_api_key() -> str:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         print(
-            "ERROR: ANTHROPIC_API_KEY is not set.\n"
+            "ERROR: OPENAI_API_KEY is not set.\n"
             "Set it as an environment variable, or create a .env file in this\n"
             "folder containing:\n"
-            "    ANTHROPIC_API_KEY=your-key-here\n\n"
-            "Get a key at https://console.anthropic.com/settings/keys",
+            "    OPENAI_API_KEY=your-key-here\n\n"
+            "Get a key at https://platform.openai.com/api-keys",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -126,41 +130,50 @@ def get_api_key() -> str:
 
 def summarize_transcript(transcript_text: str, model: str = DEFAULT_MODEL) -> str:
     """
-    Call the Claude API to turn a transcript into structured meeting notes.
+    Call the OpenAI API to turn a transcript into structured meeting notes.
 
     Returns the Markdown notes text. Exits the process on unrecoverable
     errors (missing package, missing/bad API key, API failure) — consistent
     with transcribe.py's error-handling style so both scripts behave the
     same whether run standalone or chained from pipeline.py.
     """
-    anthropic = import_anthropic()
+    openai = import_openai()
     api_key = get_api_key()
-    client = anthropic.Anthropic(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key)
 
     try:
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=model,
             max_tokens=2000,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": f"Transcript:\n\n{transcript_text}"}],
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Transcript:\n\n{transcript_text}"},
+            ],
         )
-    except anthropic.AuthenticationError as exc:
-        print(f"ERROR: Anthropic API authentication failed (check your API key): {exc}", file=sys.stderr)
+    except openai.AuthenticationError as exc:
+        print(f"ERROR: OpenAI API authentication failed (check your API key): {exc}", file=sys.stderr)
         sys.exit(1)
-    except anthropic.RateLimitError as exc:
-        print(f"ERROR: Anthropic API rate limit hit: {exc}", file=sys.stderr)
+    except openai.RateLimitError as exc:
+        print(f"ERROR: OpenAI API rate limit hit: {exc}", file=sys.stderr)
         sys.exit(1)
-    except anthropic.APIConnectionError as exc:
-        print(f"ERROR: Could not reach the Anthropic API (network issue?): {exc}", file=sys.stderr)
+    except openai.APIConnectionError as exc:
+        print(f"ERROR: Could not reach the OpenAI API (network issue?): {exc}", file=sys.stderr)
         sys.exit(1)
-    except anthropic.APIStatusError as exc:
-        print(f"ERROR: Anthropic API returned an error (status {exc.status_code}): {exc}", file=sys.stderr)
+    except openai.NotFoundError as exc:
+        print(
+            f"ERROR: OpenAI model '{model}' not found — it may be renamed/deprecated. "
+            f"Check https://platform.openai.com/docs/models and pass --model: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except openai.APIStatusError as exc:
+        print(f"ERROR: OpenAI API returned an error (status {exc.status_code}): {exc}", file=sys.stderr)
         sys.exit(1)
     except Exception as exc:  # noqa: BLE001 - last-resort catch-all so we fail with a readable message
         print(f"ERROR: Summarization failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    return response.content[0].text.strip()
+    return response.choices[0].message.content.strip()
 
 
 def summarize_and_save(
@@ -179,7 +192,7 @@ def summarize_and_save(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{base_name}_notes.md"
 
-    print(f"Generating structured meeting notes with Claude ({model})...")
+    print(f"Generating structured meeting notes with OpenAI ({model})...")
     start_time = time.perf_counter()
     notes = summarize_transcript(transcript_text, model=model)
     elapsed = time.perf_counter() - start_time
