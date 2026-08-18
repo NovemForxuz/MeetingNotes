@@ -10,9 +10,15 @@ OpenAI API key — unlike transcribe.py, this step is NOT offline.
 Usage:
     python summarize.py path\to\transcript.txt
     python summarize.py path\to\transcript.txt --model gpt-4o
+    python summarize.py path\to\transcript.txt --participants "James, Heriz, Sham, Marcus, Aaron"
 
 Requires OPENAI_API_KEY to be set, either as an environment variable or in a
 .env file in this folder. See README.md.
+
+Tip: local Whisper transcription regularly mis-hears names (e.g. "Heriz"
+came through as "Harris"/"Harry's" in testing). Pass --participants with
+the real names so the model can map garbled transcript names back to the
+right person instead of dropping them or marking items "Unassigned".
 
 Note: model names change over time — if the default below is deprecated by
 the time you read this, pass --model with a current one (check
@@ -44,21 +50,45 @@ contain transcription errors, especially on technical jargon and names — use \
 surrounding context to infer the likely intended word where a mis-transcription \
 is obvious, but do not invent details the transcript doesn't support.
 
+This is a real multi-person meeting, not a monologue. Work to figure out who is \
+speaking and attribute discussion points and action items to the correct named \
+person:
+- Track turn-taking cues like "next, X", "X, your turn", "thank you X, next is Y", \
+  or a person referring to themselves ("next is me", "so I ..."). The speaker who \
+  is currently talking owns whatever they say they'll do.
+- Names are frequently mis-transcribed (e.g. a real name like "Heriz" might come \
+  through as "Harris" or "Harry's"). If a name is used consistently for one \
+  participant throughout the transcript, treat it as that person even if it's an \
+  odd or unlikely-looking word — don't discard it. If the user-supplied participant \
+  list below includes a plausible match for a garbled name, use the real name from \
+  that list instead of the garbled transcript version.
+- Only use "Unassigned" when the transcript genuinely gives no attribution signal \
+  at all — prefer a best-effort attributed name over defaulting to Unassigned.
+
 Structure your response as Markdown with these sections (omit a section only \
 if genuinely nothing in the transcript fits it):
 
 ## Summary
 2-3 sentence overview of what the meeting covered.
 
-## Topics Discussed
-Bullet list of topics, each with a brief description.
+## Discussion
+Grouped by speaker (use their name as a subheading, e.g. "**James**"), a short \
+bullet list of what that person said, raised, or reported — status updates, \
+opinions, problems, proposals. Only include speakers who said something \
+substantive.
 
 ## Decisions Made
-Bullet list of concrete decisions reached.
+Bullet list of concrete decisions the group reached, including process/workflow \
+rules stated as decisions (e.g. branch/merge policy), not just feature decisions.
 
 ## Action Items
-Bullet list formatted as "- [Owner]: Task (due: date if mentioned)". Use \
-"Unassigned" when no owner is stated in the transcript.
+Bullet list formatted as "- [Owner]: Task (due: date if mentioned)". Attribute \
+using the speaker-tracking guidance above; use "Unassigned" only as a last resort.
+
+## Milestones
+Bullet list of any dates, deadlines, or timeline/schedule items mentioned (e.g. \
+"in two weeks: X", "due Friday: Y") that represent broader project milestones \
+rather than individual action items. Omit this section if none were mentioned.
 
 ## Open Questions
 Bullet list of unresolved items explicitly left for later.
@@ -80,6 +110,14 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=DEFAULT_MODEL,
         help=f"OpenAI model to use (default: {DEFAULT_MODEL}).",
+    )
+    parser.add_argument(
+        "--participants",
+        type=str,
+        default=None,
+        help='Comma-separated real names of meeting participants, e.g. "James, Heriz, '
+        'Sham, Marcus, Aaron". Helps the model correctly attribute action items when '
+        "Whisper has mis-transcribed names.",
     )
     return parser.parse_args()
 
@@ -128,7 +166,11 @@ def get_api_key() -> str:
     return api_key
 
 
-def summarize_transcript(transcript_text: str, model: str = DEFAULT_MODEL) -> str:
+def summarize_transcript(
+    transcript_text: str,
+    model: str = DEFAULT_MODEL,
+    participants: str | None = None,
+) -> str:
     """
     Call the OpenAI API to turn a transcript into structured meeting notes.
 
@@ -141,13 +183,21 @@ def summarize_transcript(transcript_text: str, model: str = DEFAULT_MODEL) -> st
     api_key = get_api_key()
     client = openai.OpenAI(api_key=api_key)
 
+    user_content = f"Transcript:\n\n{transcript_text}"
+    if participants:
+        user_content = (
+            f"Known participants in this meeting: {participants}\n"
+            f"(Use these real names to correct any garbled/mis-transcribed names you "
+            f"encounter in the transcript below.)\n\n{user_content}"
+        )
+
     try:
         response = client.chat.completions.create(
             model=model,
             max_tokens=2000,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Transcript:\n\n{transcript_text}"},
+                {"role": "user", "content": user_content},
             ],
         )
     except openai.AuthenticationError as exc:
@@ -180,6 +230,7 @@ def summarize_and_save(
     transcript_text: str,
     base_name: str,
     model: str = DEFAULT_MODEL,
+    participants: str | None = None,
     output_dir: Path | None = None,
 ) -> dict:
     """
@@ -194,7 +245,7 @@ def summarize_and_save(
 
     print(f"Generating structured meeting notes with OpenAI ({model})...")
     start_time = time.perf_counter()
-    notes = summarize_transcript(transcript_text, model=model)
+    notes = summarize_transcript(transcript_text, model=model, participants=participants)
     elapsed = time.perf_counter() - start_time
 
     output_path.write_text(notes, encoding="utf-8")
@@ -214,7 +265,12 @@ def main() -> None:
     args = parse_args()
     transcript_path = Path(args.transcript_path).expanduser().resolve()
     transcript_text = check_transcript_file(transcript_path)
-    summarize_and_save(transcript_text, transcript_path.stem, model=args.model)
+    summarize_and_save(
+        transcript_text,
+        transcript_path.stem,
+        model=args.model,
+        participants=args.participants,
+    )
 
 
 if __name__ == "__main__":

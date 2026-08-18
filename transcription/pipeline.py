@@ -12,6 +12,7 @@ Usage:
     python pipeline.py path\to\recording.flac --model small --language en --initial-prompt "Docker, Git, MVP"
     python pipeline.py path\to\recording.flac --skip-summary
     python pipeline.py path\to\recording.flac --summary-model gpt-4o
+    python pipeline.py path\to\recording.flac --participants "James, Heriz, Sham, Marcus, Aaron"
 
 Output (both saved under ./output/):
     - <input filename stem>.txt        (transcript, from transcribe.py)
@@ -62,6 +63,14 @@ def parse_args() -> argparse.Namespace:
         help=f"OpenAI model for the summarization step (default: {summarize.DEFAULT_MODEL}).",
     )
     parser.add_argument(
+        "--participants",
+        type=str,
+        default=None,
+        help='Comma-separated real participant names, e.g. "James, Heriz, Sham, Marcus, '
+        'Aaron". Passed to the summarization step to correctly attribute action items '
+        "when Whisper has mis-transcribed names.",
+    )
+    parser.add_argument(
         "--skip-summary",
         action="store_true",
         help="Only run transcription; skip the OpenAI summarization step (e.g. if you don't "
@@ -95,6 +104,7 @@ def main() -> None:
         transcription_result["transcript"],
         audio_path.stem,
         model=args.summary_model,
+        participants=args.participants,
     )
 
     print("\n" + "=" * 60)

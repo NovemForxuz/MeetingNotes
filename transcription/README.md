@@ -125,12 +125,24 @@ Given an existing transcript (e.g. from a previous `transcribe.py` run):
 ```bash
 python summarize.py output\recording.txt
 python summarize.py output\recording.txt --model gpt-4o
+python summarize.py output\recording.txt --participants "James, Heriz, Sham, Marcus, Aaron"
 ```
 
-Produces structured Markdown notes with sections: Summary, Topics Discussed,
-Decisions Made, Action Items (with owner + due date when the transcript
-states them), and Open Questions. Saved to `output\<name>_notes.md`, and
-also printed to console along with how long the API call took.
+Produces structured Markdown notes with sections: Summary, Discussion
+(grouped by speaker), Decisions Made, Action Items (with owner + due date
+when the transcript states them), Milestones (dates/deadlines mentioned),
+and Open Questions. Saved to `output\<name>_notes.md`, and also printed to
+console along with how long the API call took.
+
+**Use `--participants`** with the real names of meeting attendees when you
+have them — Whisper regularly mis-hears names (confirmed in testing: "Heriz"
+came through as "Harris"/"Harry's" throughout a real transcript), and this
+lets the summarization model map garbled names back to the right person and
+attribute action items correctly instead of dropping them or marking them
+"Unassigned". It can only fix names Whisper *did* transcribe, just wrong —
+if Whisper missed a name entirely, try adding it to `transcribe.py`'s
+`--initial-prompt` instead, so Whisper has a better shot at catching it in
+the first place.
 
 ## Improving accuracy
 
