@@ -9,14 +9,16 @@ don't have to run two commands by hand.
 
 Usage:
     python pipeline.py path\to\recording.flac
+    python pipeline.py                              # auto-picks the one file in ./input/
     python pipeline.py path\to\recording.flac --model small --language en --initial-prompt "Docker, Git, MVP"
     python pipeline.py path\to\recording.flac --skip-summary
     python pipeline.py path\to\recording.flac --summary-model gpt-4o
     python pipeline.py path\to\recording.flac --participants "James, Heriz, Sham, Marcus, Aaron"
 
-Output (both saved under ./output/):
-    - <input filename stem>.txt        (transcript, from transcribe.py)
-    - <input filename stem>_notes.md   (structured notes, from summarize.py)
+Output (both saved under ./output/, sharing one timestamp so the pair is
+easy to spot):
+    - <timestamp>_<input filename stem>.txt        (transcript, from transcribe.py)
+    - <timestamp>_<input filename stem>_notes.md   (structured notes, from summarize.py)
 """
 
 import argparse
@@ -35,7 +37,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "audio_path",
         type=str,
-        help="Path to the audio file to transcribe (e.g. a .flac recording from Discord).",
+        nargs="?",
+        default=None,
+        help="Path to the audio file to transcribe (e.g. a .flac recording from Discord). "
+        "A bare filename is also looked up inside ./input/. If omitted, auto-picks the "
+        "single audio file in ./input/ (errors if there's zero or more than one).",
     )
     parser.add_argument(
         "--model",
@@ -81,7 +87,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    audio_path = Path(args.audio_path).expanduser().resolve()
+    audio_path = transcribe.resolve_audio_path(args.audio_path)
+    timestamp = transcribe.make_timestamp()
 
     print("=" * 60)
     print("STEP 1/2: TRANSCRIPTION (local, offline)")
@@ -91,6 +98,7 @@ def main() -> None:
         model_name=args.model,
         language=args.language,
         initial_prompt=args.initial_prompt,
+        timestamp=timestamp,
     )
 
     if args.skip_summary:
@@ -105,6 +113,7 @@ def main() -> None:
         audio_path.stem,
         model=args.summary_model,
         participants=args.participants,
+        timestamp=timestamp,
     )
 
     print("\n" + "=" * 60)

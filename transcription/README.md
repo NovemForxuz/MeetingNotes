@@ -75,6 +75,35 @@ never commit real keys. `transcribe.py` alone doesn't need this; only
 
 ## Usage
 
+### Dropping files in `input/`
+
+All three scripts accept an explicit path, but you can also just drop a
+recording into `transcription/input/` and omit the path argument — it'll
+auto-pick the one audio file found there:
+
+```bash
+python transcribe.py                    # auto-picks the single file in input/
+python transcribe.py recording.flac     # looked up inside input/ if not found as-is
+python pipeline.py                      # same auto-pick behavior
+```
+
+If `input/` has zero or more than one audio file, you'll get a clear error
+telling you what's there instead of it guessing. `input/` is gitignored,
+same as `output/` — it's meant to hold real recordings locally, not get
+committed.
+
+### Output filenames
+
+Every run prefixes its output filename with a timestamp
+(`YYYYMMDD_HHMMSS_`), so repeated runs never silently overwrite each
+other. `pipeline.py` uses one shared timestamp for both the transcript and
+the notes file, so the pair is easy to spot together, e.g.:
+
+```
+output/20260818_225216_recording.txt
+output/20260818_225216_recording_notes.md
+```
+
 ### Full pipeline (transcribe + summarize)
 
 ```bash
@@ -83,8 +112,8 @@ python pipeline.py path\to\recording.flac --model small --language en --initial-
 python pipeline.py path\to\recording.flac --skip-summary   # transcription only, no API key needed
 ```
 
-Saves both `output\<name>.txt` (transcript) and `output\<name>_notes.md`
-(structured notes).
+Saves both `output\<timestamp>_<name>.txt` (transcript) and
+`output\<timestamp>_<name>_notes.md` (structured notes).
 
 ### Transcription only
 
@@ -111,7 +140,7 @@ python transcribe.py path\to\recording.flac --model small --language en --initia
 
 The transcript is:
 - printed to the console, and
-- saved to `output\<input_filename>.txt`
+- saved to `output\<timestamp>_<input_filename>.txt`
 
 The script also prints:
 - which device it used (GPU/CPU — auto-detected)
@@ -131,8 +160,8 @@ python summarize.py output\recording.txt --participants "James, Heriz, Sham, Mar
 Produces structured Markdown notes with sections: Summary, Discussion
 (grouped by speaker), Decisions Made, Action Items (with owner + due date
 when the transcript states them), Milestones (dates/deadlines mentioned),
-and Open Questions. Saved to `output\<name>_notes.md`, and also printed to
-console along with how long the API call took.
+and Open Questions. Saved to `output\<timestamp>_<name>_notes.md`, and also
+printed to console along with how long the API call took.
 
 **Use `--participants`** with the real names of meeting attendees when you
 have them — Whisper regularly mis-hears names (confirmed in testing: "Heriz"

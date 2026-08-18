@@ -11,10 +11,12 @@ Usage:
     python transcribe.py path\to\recording.flac
     python transcribe.py path\to\recording.flac --model small
     python transcribe.py path\to\recording.flac --model small --initial-prompt "Docker, CI/CD, ASP.NET Core, C#, .NET, Git, MVP, webhooks, containers"
+    python transcribe.py                          # auto-picks the one file in ./input/
+    python transcribe.py recording.flac            # resolves against ./input/ if not found as-is
 
 Output:
     - Transcript printed to console
-    - Transcript saved to ./output/<input_filename>.txt
+    - Transcript saved to ./output/<timestamp>_<input_filename>.txt
 
 Notes on accuracy:
     - The "base" model is fast but weak on domain-specific jargon (e.g. it
@@ -29,6 +31,7 @@ import argparse
 import shutil
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 # Models ordered roughly from fastest/least-accurate to slowest/most-accurate.
@@ -38,6 +41,59 @@ SUPPORTED_EXTENSIONS = {
     ".flac", ".mp3", ".wav", ".m4a", ".ogg", ".webm", ".mp4", ".mpeg", ".mpga",
 }
 
+INPUT_DIR = Path(__file__).parent / "input"
+
+
+def make_timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def resolve_audio_path(audio_arg: str | None) -> Path:
+    """
+    Figure out which audio file to transcribe.
+
+    - No argument given: look in ./input/ for exactly one supported audio
+      file and use it. Errors (with a clear message) if there are zero or
+      more than one.
+    - Argument given: use it as-is (absolute or relative to cwd) if it
+      exists; otherwise fall back to treating it as a filename inside
+      ./input/, so you can drop a file in ./input/ and just pass its name.
+    """
+    if audio_arg is None:
+        INPUT_DIR.mkdir(parents=True, exist_ok=True)
+        candidates = sorted(
+            p for p in INPUT_DIR.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        )
+        if not candidates:
+            print(
+                f"ERROR: No audio file given, and no supported audio file found in "
+                f"{INPUT_DIR}.\nEither pass a path, or drop a file into that folder.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if len(candidates) > 1:
+            names = "\n".join(f"  - {p.name}" for p in candidates)
+            print(
+                f"ERROR: Multiple audio files found in {INPUT_DIR}, and no path was given "
+                f"to disambiguate:\n{names}\nPass one explicitly, e.g. "
+                f"transcribe.py {candidates[0].name}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return candidates[0].resolve()
+
+    given_path = Path(audio_arg).expanduser()
+    if given_path.exists():
+        return given_path.resolve()
+
+    fallback_path = INPUT_DIR / audio_arg
+    if fallback_path.exists():
+        return fallback_path.resolve()
+
+    # Neither exists — return the as-given path so the normal "not found"
+    # error message downstream reports the path the user actually typed.
+    return given_path.resolve()
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -46,7 +102,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "audio_path",
         type=str,
-        help="Path to the audio file to transcribe (e.g. a .flac recording from Discord).",
+        nargs="?",
+        default=None,
+        help="Path to the audio file to transcribe (e.g. a .flac recording from Discord). "
+        "A bare filename is also looked up inside ./input/. If omitted, auto-picks the "
+        "single audio file in ./input/ (errors if there's zero or more than one).",
     )
     parser.add_argument(
         "--model",
@@ -146,17 +206,22 @@ def transcribe_audio(
     language: str | None = None,
     initial_prompt: str | None = None,
     output_dir: Path | None = None,
+    timestamp: str | None = None,
 ) -> dict:
     """
     Run the full local transcription pipeline for a single audio file.
 
     Validates ffmpeg/the input file, loads the Whisper model on the best
     available device, transcribes, saves the transcript to
-    <output_dir>/<audio filename stem>.txt, prints progress/results, and
-    returns a dict with the outcome. Exits the process (sys.exit) on
-    unrecoverable errors — this is intentional so callers (this script's
-    CLI, or pipeline.py chaining into summarize.py) all fail the same way
-    without needing their own try/except around this call.
+    <output_dir>/<timestamp>_<audio filename stem>.txt, prints
+    progress/results, and returns a dict with the outcome. Exits the
+    process (sys.exit) on unrecoverable errors — this is intentional so
+    callers (this script's CLI, or pipeline.py chaining into summarize.py)
+    all fail the same way without needing their own try/except around this
+    call.
+
+    timestamp: pass one in to keep a transcript/notes pair aligned (e.g.
+    from pipeline.py); otherwise one is generated here.
 
     Returns:
         {
@@ -165,15 +230,17 @@ def transcribe_audio(
             "language": str,
             "device": str,
             "elapsed_seconds": float,
+            "timestamp": str,
         }
     """
     check_ffmpeg()
     check_audio_file(audio_path)
     whisper = import_whisper()
 
+    timestamp = timestamp or make_timestamp()
     output_dir = output_dir or (Path(__file__).parent / "output")
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{audio_path.stem}.txt"
+    output_path = output_dir / f"{timestamp}_{audio_path.stem}.txt"
 
     device = detect_device()
 
@@ -224,12 +291,13 @@ def transcribe_audio(
         "language": detected_language,
         "device": device,
         "elapsed_seconds": elapsed,
+        "timestamp": timestamp,
     }
 
 
 def main() -> None:
     args = parse_args()
-    audio_path = Path(args.audio_path).expanduser().resolve()
+    audio_path = resolve_audio_path(args.audio_path)
     transcribe_audio(
         audio_path,
         model_name=args.model,

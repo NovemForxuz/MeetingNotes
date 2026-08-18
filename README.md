@@ -25,6 +25,8 @@ MeetingNotes/
 │   ├── transcribe.py    # local Whisper transcription (offline)
 │   ├── summarize.py     # transcript -> Markdown notes (OpenAI API)
 │   ├── pipeline.py      # chains the two above
+│   ├── input/            # drop recordings here (gitignored); scripts auto-pick if path omitted
+│   ├── output/           # timestamped transcripts/notes land here (gitignored)
 │   └── README.md        # full setup/usage/troubleshooting details
 └── MeetingNotes.Api/    # ASP.NET Core Web API scaffold
 ```
@@ -46,21 +48,23 @@ smoke test):
 
 ```bash
 python transcribe.py path\to\any_short_audio_file.wav
+python transcribe.py                                   # or drop a file in input/ and omit the path
 ```
 Expect: the transcript printed to console, saved to
-`transcription/output/<filename>.txt`, and a line reporting how long it
-took. If you don't have a recording handy, any short `.wav`/`.mp3`/`.flac`
-works for a smoke test — it doesn't need to be a real meeting.
+`transcription/output/<timestamp>_<filename>.txt`, and a line reporting how
+long it took. If you don't have a recording handy, any short
+`.wav`/`.mp3`/`.flac` works for a smoke test — it doesn't need to be a real
+meeting.
 
 **2. Summarization only** (needs `OPENAI_API_KEY` set in
 `transcription/.env` — see `transcription/README.md` §3):
 
 ```bash
-python summarize.py output\<filename>.txt
+python summarize.py output\<timestamp>_<filename>.txt
 ```
-Expect: structured Markdown notes (Summary / Topics Discussed / Decisions
-Made / Action Items / Open Questions) printed to console and saved to
-`output\<filename>_notes.md`.
+Expect: structured Markdown notes (Summary / Discussion / Decisions Made /
+Action Items / Milestones / Open Questions) printed to console and saved to
+`output\<new timestamp>_<filename>_notes.md`.
 
 **3. Full pipeline** (both steps chained):
 

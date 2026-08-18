@@ -9,7 +9,8 @@ __pycache__/
 .venv/
 venv/
 
-# Whisper output / local artifacts
+# Whisper input/output — local artifacts, real recordings/transcripts
+transcription/input/
 transcription/output/
 
 # Audio/media test files (can be large; keep real recordings out of git)

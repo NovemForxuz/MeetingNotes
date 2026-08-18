@@ -26,13 +26,14 @@ https://platform.openai.com/docs/models).
 
 Output:
     - Structured meeting notes (Markdown) printed to console
-    - Saved to ./output/<transcript filename stem>_notes.md
+    - Saved to ./output/<timestamp>_<transcript filename stem>_notes.md
 """
 
 import argparse
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 try:
@@ -43,6 +44,10 @@ except ImportError:
     pass  # python-dotenv is optional; OPENAI_API_KEY can still be a real env var.
 
 DEFAULT_MODEL = "gpt-4o-mini"
+
+
+def make_timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 SYSTEM_PROMPT = """You are an assistant that turns raw meeting transcripts into clear, \
 structured meeting notes. The transcript comes from local speech-to-text and may \
@@ -232,16 +237,21 @@ def summarize_and_save(
     model: str = DEFAULT_MODEL,
     participants: str | None = None,
     output_dir: Path | None = None,
+    timestamp: str | None = None,
 ) -> dict:
     """
     Summarize transcript_text and save the result to
-    <output_dir>/<base_name>_notes.md. Prints the notes and timing.
+    <output_dir>/<timestamp>_<base_name>_notes.md. Prints the notes and timing.
+
+    timestamp: pass one in to keep a transcript/notes pair aligned (e.g.
+    from pipeline.py); otherwise one is generated here.
 
     Returns a dict with "notes", "output_path", "elapsed_seconds".
     """
+    timestamp = timestamp or make_timestamp()
     output_dir = output_dir or (Path(__file__).parent / "output")
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{base_name}_notes.md"
+    output_path = output_dir / f"{timestamp}_{base_name}_notes.md"
 
     print(f"Generating structured meeting notes with OpenAI ({model})...")
     start_time = time.perf_counter()
