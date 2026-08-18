@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""
+pipeline.py — chains transcribe.py + summarize.py into one command.
+
+Discord audio file -> local Whisper transcript -> structured meeting notes
+(via the Claude API), end to end. transcribe.py and summarize.py both still
+work standalone; this just calls their reusable functions in sequence so you
+don't have to run two commands by hand.
+
+Usage:
+    python pipeline.py path\to\recording.flac
+    python pipeline.py path\to\recording.flac --model small --language en --initial-prompt "Docker, Git, MVP"
+    python pipeline.py path\to\recording.flac --skip-summary
+    python pipeline.py path\to\recording.flac --claude-model claude-sonnet-5
+
+Output (both saved under ./output/):
+    - <input filename stem>.txt        (transcript, from transcribe.py)
+    - <input filename stem>_notes.md   (structured notes, from summarize.py)
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+import summarize
+import transcribe
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Transcribe an audio file locally, then summarize it into structured "
+        "meeting notes via the Claude API."
+    )
+    parser.add_argument(
+        "audio_path",
+        type=str,
+        help="Path to the audio file to transcribe (e.g. a .flac recording from Discord).",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="base",
+        choices=transcribe.VALID_MODELS,
+        help="Whisper model size for transcription (default: base).",
+    )
+    parser.add_argument(
+        "--language",
+        type=str,
+        default=None,
+        help="Force a language code (e.g. 'en') for transcription instead of auto-detecting.",
+    )
+    parser.add_argument(
+        "--initial-prompt",
+        type=str,
+        default=None,
+        help="Vocabulary hint text passed to Whisper to improve jargon recognition.",
+    )
+    parser.add_argument(
+        "--claude-model",
+        type=str,
+        default=summarize.DEFAULT_MODEL,
+        help=f"Claude model for the summarization step (default: {summarize.DEFAULT_MODEL}).",
+    )
+    parser.add_argument(
+        "--skip-summary",
+        action="store_true",
+        help="Only run transcription; skip the Claude summarization step (e.g. if you don't "
+        "have an API key set up yet).",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    audio_path = Path(args.audio_path).expanduser().resolve()
+
+    print("=" * 60)
+    print("STEP 1/2: TRANSCRIPTION (local, offline)")
+    print("=" * 60)
+    transcription_result = transcribe.transcribe_audio(
+        audio_path,
+        model_name=args.model,
+        language=args.language,
+        initial_prompt=args.initial_prompt,
+    )
+
+    if args.skip_summary:
+        print("\n--skip-summary set: stopping after transcription.")
+        return
+
+    print("\n" + "=" * 60)
+    print("STEP 2/2: SUMMARIZATION (Claude API, requires network)")
+    print("=" * 60)
+    summary_result = summarize.summarize_and_save(
+        transcription_result["transcript"],
+        audio_path.stem,
+        model=args.claude_model,
+    )
+
+    print("\n" + "=" * 60)
+    print("PIPELINE COMPLETE")
+    print("=" * 60)
+    print(f"Transcript:    {transcription_result['output_path']}")
+    print(f"Meeting notes: {summary_result['output_path']}")
+    total_elapsed = transcription_result["elapsed_seconds"] + summary_result["elapsed_seconds"]
+    print(f"Total time: {total_elapsed:.1f} seconds ({total_elapsed / 60:.1f} minutes).")
+
+
+if __name__ == "__main__":
+    main()

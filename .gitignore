@@ -27,3 +27,6 @@ Thumbs.db
 
 # Claude Code local settings (machine-specific permissions, not shared)
 .claude/settings.local.json
+
+# Secrets — never commit API keys
+.env

@@ -8,3 +8,8 @@ torch
 # NOTE: ffmpeg is NOT a Python package and is not installed by pip.
 # Whisper shells out to the ffmpeg binary to decode audio, so it must be
 # installed separately and available on your PATH. See README.md.
+
+# Summarization (summarize.py / pipeline.py) — calls the Anthropic Claude
+# API, so this part is NOT offline and requires an ANTHROPIC_API_KEY.
+anthropic
+python-dotenv

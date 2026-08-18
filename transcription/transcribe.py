@@ -140,25 +140,48 @@ def detect_device() -> str:
     return "cpu"
 
 
-def main() -> None:
-    args = parse_args()
-    audio_path = Path(args.audio_path).expanduser().resolve()
+def transcribe_audio(
+    audio_path: Path,
+    model_name: str = "base",
+    language: str | None = None,
+    initial_prompt: str | None = None,
+    output_dir: Path | None = None,
+) -> dict:
+    """
+    Run the full local transcription pipeline for a single audio file.
 
+    Validates ffmpeg/the input file, loads the Whisper model on the best
+    available device, transcribes, saves the transcript to
+    <output_dir>/<audio filename stem>.txt, prints progress/results, and
+    returns a dict with the outcome. Exits the process (sys.exit) on
+    unrecoverable errors — this is intentional so callers (this script's
+    CLI, or pipeline.py chaining into summarize.py) all fail the same way
+    without needing their own try/except around this call.
+
+    Returns:
+        {
+            "transcript": str,
+            "output_path": Path,
+            "language": str,
+            "device": str,
+            "elapsed_seconds": float,
+        }
+    """
     check_ffmpeg()
     check_audio_file(audio_path)
     whisper = import_whisper()
 
-    output_dir = Path(__file__).parent / "output"
+    output_dir = output_dir or (Path(__file__).parent / "output")
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{audio_path.stem}.txt"
 
     device = detect_device()
 
-    print(f"Loading Whisper model '{args.model}'...")
+    print(f"Loading Whisper model '{model_name}'...")
     try:
-        model = whisper.load_model(args.model, device=device)
+        model = whisper.load_model(model_name, device=device)
     except Exception as exc:  # noqa: BLE001 - surface any load failure clearly
-        print(f"ERROR: Failed to load Whisper model '{args.model}': {exc}", file=sys.stderr)
+        print(f"ERROR: Failed to load Whisper model '{model_name}': {exc}", file=sys.stderr)
         sys.exit(1)
 
     print(f"Transcribing '{audio_path.name}'... (this may take a while on CPU)")
@@ -166,8 +189,8 @@ def main() -> None:
     try:
         result = model.transcribe(
             str(audio_path),
-            language=args.language,
-            initial_prompt=args.initial_prompt,
+            language=language,
+            initial_prompt=initial_prompt,
         )
     except FileNotFoundError as exc:
         # Typically means ffmpeg couldn't be invoked despite passing the PATH check above.
@@ -194,6 +217,25 @@ def main() -> None:
     print(f"\nSaved transcript to: {output_path}")
     print(f"Detected language: {detected_language}")
     print(f"Transcription took {elapsed:.1f} seconds ({elapsed / 60:.1f} minutes).")
+
+    return {
+        "transcript": transcript,
+        "output_path": output_path,
+        "language": detected_language,
+        "device": device,
+        "elapsed_seconds": elapsed,
+    }
+
+
+def main() -> None:
+    args = parse_args()
+    audio_path = Path(args.audio_path).expanduser().resolve()
+    transcribe_audio(
+        audio_path,
+        model_name=args.model,
+        language=args.language,
+        initial_prompt=args.initial_prompt,
+    )
 
 
 if __name__ == "__main__":

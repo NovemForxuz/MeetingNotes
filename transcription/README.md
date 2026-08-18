@@ -1,12 +1,17 @@
-# MeetingNotes — Local Transcription (MVP)
+# MeetingNotes — Local Transcription + Summarization (MVP)
 
-This is the first building block of the MeetingNotes pipeline: turning a
-recorded Discord audio file into a text transcript, fully offline, using
-OpenAI's open-source [Whisper](https://github.com/openai/whisper) model.
+This is the MeetingNotes MVP pipeline: turning a recorded Discord audio file
+into structured meeting notes, in two chained steps.
 
-No audio or text leaves your machine at this stage — no API calls. The next
-step (not part of this script) will feed the resulting transcript into the
-Anthropic Claude API to generate structured meeting notes.
+| Script | Does what | Offline? |
+|---|---|---|
+| `transcribe.py` | Audio → text transcript, via local [Whisper](https://github.com/openai/whisper) | Yes — fully offline, no API calls |
+| `summarize.py` | Transcript → structured Markdown notes, via the Anthropic Claude API | No — needs network + an API key |
+| `pipeline.py` | Runs both of the above in sequence | No (unless `--skip-summary`) |
+
+Each script also works standalone with its own CLI — `pipeline.py` just
+imports their reusable functions (`transcribe_audio()`, `summarize_and_save()`)
+and calls them one after another; it doesn't duplicate any logic.
 
 ## Setup
 
@@ -42,11 +47,42 @@ From this `transcription/` folder:
 pip install -r requirements.txt
 ```
 
-This installs `openai-whisper` and its dependency `torch`. First run of the
-script will also download the selected model's weights (one-time, cached
-under `~/.cache/whisper`).
+This installs `openai-whisper`/`torch` (transcription) and `anthropic`/
+`python-dotenv` (summarization). First run of `transcribe.py` will also
+download the selected Whisper model's weights (one-time, cached under
+`~/.cache/whisper`).
+
+### 3. Set up your Anthropic API key (only needed for summarize.py / pipeline.py)
+
+Copy `.env.example` to `.env` in this folder and fill in a real key:
+
+```bash
+copy .env.example .env
+```
+
+```
+ANTHROPIC_API_KEY=your-key-here
+```
+
+Get a key at https://console.anthropic.com/settings/keys. `.env` is
+gitignored — never commit real keys. `transcribe.py` alone doesn't need
+this; only `summarize.py` and `pipeline.py` (unless run with
+`--skip-summary`) do.
 
 ## Usage
+
+### Full pipeline (transcribe + summarize)
+
+```bash
+python pipeline.py path\to\recording.flac
+python pipeline.py path\to\recording.flac --model small --language en --initial-prompt "Docker, Git, MVP"
+python pipeline.py path\to\recording.flac --skip-summary   # transcription only, no API key needed
+```
+
+Saves both `output\<name>.txt` (transcript) and `output\<name>_notes.md`
+(structured notes).
+
+### Transcription only
 
 ```bash
 python transcribe.py path\to\recording.flac
@@ -77,6 +113,20 @@ The script also prints:
 - which device it used (GPU/CPU — auto-detected)
 - the language Whisper detected
 - how long transcription took, so you can gauge performance on your hardware
+
+### Summarization only
+
+Given an existing transcript (e.g. from a previous `transcribe.py` run):
+
+```bash
+python summarize.py output\recording.txt
+python summarize.py output\recording.txt --model claude-sonnet-5
+```
+
+Produces structured Markdown notes with sections: Summary, Topics Discussed,
+Decisions Made, Action Items (with owner + due date when the transcript
+states them), and Open Questions. Saved to `output\<name>_notes.md`, and
+also printed to console along with how long the API call took.
 
 ## Improving accuracy
 
@@ -164,9 +214,20 @@ the accuracy gain from `small` is worth the modest extra time.
 
 ## Error handling
 
-The script checks for and reports, with a clear message instead of a raw
+Both scripts check for and report, with a clear message instead of a raw
 stack trace:
+
+**transcribe.py:**
 - missing/misspelled audio file path
 - missing `ffmpeg` on PATH
 - unsupported/corrupt audio format
 - missing `openai-whisper` package
+
+**summarize.py:**
+- missing/misspelled transcript file path, or an empty transcript
+- missing `anthropic` package
+- missing/invalid `ANTHROPIC_API_KEY`
+- Anthropic API errors: auth failure, rate limit, network/connection issue,
+  other API-side errors
+
+`pipeline.py` surfaces whichever of the above happens, from either step.
