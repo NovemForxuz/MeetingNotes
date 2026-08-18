@@ -10,10 +10,19 @@ API for structured meeting notes.
 Usage:
     python transcribe.py path\to\recording.flac
     python transcribe.py path\to\recording.flac --model small
+    python transcribe.py path\to\recording.flac --model small --initial-prompt "Docker, CI/CD, ASP.NET Core, C#, .NET, Git, MVP, webhooks, containers"
 
 Output:
     - Transcript printed to console
     - Transcript saved to ./output/<input_filename>.txt
+
+Notes on accuracy:
+    - The "base" model is fast but weak on domain-specific jargon (e.g. it
+      commonly mis-hears "Docker" as "darker", "containers" as "condoms").
+      Try --model small or --model medium if technical terms matter.
+    - Use --initial-prompt to bias Whisper toward expected vocabulary (names,
+      acronyms, product/tech terms). This measurably improves recognition of
+      terms that appear in the prompt.
 """
 
 import argparse
@@ -45,6 +54,21 @@ def parse_args() -> argparse.Namespace:
         default="base",
         choices=VALID_MODELS,
         help="Whisper model size to use (default: base). Larger models are more accurate but slower.",
+    )
+    parser.add_argument(
+        "--language",
+        type=str,
+        default=None,
+        help="Force a language code (e.g. 'en') instead of Whisper auto-detecting it. "
+        "Useful if auto-detection drifts mid-file.",
+    )
+    parser.add_argument(
+        "--initial-prompt",
+        type=str,
+        default=None,
+        help="Optional text to prime Whisper with expected vocabulary (names, acronyms, "
+        "technical terms). E.g. \"Docker, CI/CD, ASP.NET Core, C#, .NET, Git, MVP\". "
+        "Improves recognition of jargon that base/small models otherwise mis-hear.",
     )
     return parser.parse_args()
 
@@ -96,6 +120,26 @@ def import_whisper():
     return whisper
 
 
+def detect_device() -> str:
+    """Use CUDA automatically if available, otherwise fall back to CPU."""
+    try:
+        import torch
+    except ImportError:
+        print("Using device: cpu (torch not importable)")
+        return "cpu"
+
+    if torch.cuda.is_available():
+        device_name = torch.cuda.get_device_name(0)
+        print(f"Using device: cuda ({device_name})")
+        return "cuda"
+
+    print(
+        "Using device: cpu (no CUDA GPU detected, or torch was installed without CUDA "
+        "support — see README.md for enabling GPU acceleration)"
+    )
+    return "cpu"
+
+
 def main() -> None:
     args = parse_args()
     audio_path = Path(args.audio_path).expanduser().resolve()
@@ -108,9 +152,11 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{audio_path.stem}.txt"
 
+    device = detect_device()
+
     print(f"Loading Whisper model '{args.model}'...")
     try:
-        model = whisper.load_model(args.model)
+        model = whisper.load_model(args.model, device=device)
     except Exception as exc:  # noqa: BLE001 - surface any load failure clearly
         print(f"ERROR: Failed to load Whisper model '{args.model}': {exc}", file=sys.stderr)
         sys.exit(1)
@@ -118,7 +164,11 @@ def main() -> None:
     print(f"Transcribing '{audio_path.name}'... (this may take a while on CPU)")
     start_time = time.perf_counter()
     try:
-        result = model.transcribe(str(audio_path))
+        result = model.transcribe(
+            str(audio_path),
+            language=args.language,
+            initial_prompt=args.initial_prompt,
+        )
     except FileNotFoundError as exc:
         # Typically means ffmpeg couldn't be invoked despite passing the PATH check above.
         print(f"ERROR: Could not read audio file (ffmpeg issue?): {exc}", file=sys.stderr)
@@ -132,6 +182,7 @@ def main() -> None:
     elapsed = time.perf_counter() - start_time
 
     transcript = result["text"].strip()
+    detected_language = result.get("language", "unknown")
 
     output_path.write_text(transcript, encoding="utf-8")
 
@@ -141,6 +192,7 @@ def main() -> None:
     print(transcript)
     print("=" * 60)
     print(f"\nSaved transcript to: {output_path}")
+    print(f"Detected language: {detected_language}")
     print(f"Transcription took {elapsed:.1f} seconds ({elapsed / 60:.1f} minutes).")
 
 

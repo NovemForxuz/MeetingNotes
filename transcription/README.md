@@ -61,12 +61,52 @@ python transcribe.py path\to\recording.flac --model small
 Available models (fastest/least-accurate → slowest/most-accurate):
 `tiny`, `base` (default), `small`, `medium`, `large`.
 
+Force a language (skip auto-detection) and/or prime Whisper with expected
+vocabulary — both help a lot with jargon-heavy meetings (see
+"Improving accuracy" below):
+
+```bash
+python transcribe.py path\to\recording.flac --model small --language en --initial-prompt "Docker, CI/CD, ASP.NET Core, C#, .NET, Git, MVP"
+```
+
 The transcript is:
 - printed to the console, and
 - saved to `output\<input_filename>.txt`
 
-The script also prints how long transcription took, so you can gauge
-performance on your hardware.
+The script also prints:
+- which device it used (GPU/CPU — auto-detected)
+- the language Whisper detected
+- how long transcription took, so you can gauge performance on your hardware
+
+## Improving accuracy
+
+The `base` model badly mangles technical/domain jargon — confirmed on a real
+test recording, where it turned "Docker" into "darker", "containers" into
+"condoms", and "ASP.NET Core" into "PSP dot net core". This is a known
+`base`-model weakness, not a bug in the script. Two things that measurably
+helped in testing against that same file:
+
+1. **Use `--model small` (or larger).** This did most of the work — jargon
+   that `base` completely mangled came through legibly with `small`
+   ("Docker", "Git", "ASP.NET Core", "Discord integration", "webhooks or
+   polling" were all correctly transcribed).
+2. **Use `--initial-prompt` with your recurring vocabulary** (product names,
+   acronyms, tech stack terms). This primes Whisper's decoder toward the
+   right words and sharpened jargon recognition further on top of the
+   model-size improvement.
+
+Also worth checking: **the language Whisper detected**, printed after each
+run. On the same test file, Whisper's auto-detect locked onto `ms` (Malay)
+even though the audio was English — auto-detection only samples the first
+~30 seconds and can drift, especially with accented speech. Forcing
+`--language en` didn't fix `base`'s jargon problem by itself, but combined
+with `small` + `--initial-prompt` it gave the best result of everything
+tested, including correctly picking up "Discord.NET" as a specific term.
+
+None of this fixes multi-speaker separation — Whisper has no concept of
+"who's talking." If multiple people overlap, expect blending/garbling
+regardless of model size; that would need a separate diarization step
+(e.g. `pyannote.audio`), out of scope for this MVP.
 
 ## CPU vs. GPU
 
@@ -108,11 +148,19 @@ Larger models (`small`/`medium`/`large`) are noticeably slower — budget
 
 ### Confirmed on this machine
 
-A short (~20s) synthetic test clip was transcribed successfully on CPU
-(current setup, no CUDA torch installed): model load + transcription took
-about 13 seconds total, with actual transcription at ~4 seconds. Extrapolating
-CPU-only throughput, a real 30-minute recording should land in the
-~5–15 minute range noted above.
+Measured on CPU (no CUDA torch installed) against a real ~105-second test
+recording:
+
+| Config                                              | Time    |
+|------------------------------------------------------|---------|
+| `base`, auto-detect language                          | ~18–20s |
+| `small` + `--language en` + `--initial-prompt`        | ~32s    |
+
+Roughly 2x slower going from `base` to `small`, consistent with the guidance
+above. Extrapolating to a real 30-minute recording (~17x longer than this
+test clip), expect `small` to land around **9–10 minutes** on this machine's
+CPU — comfortably within the ~5–15 minute range estimated for `base`, since
+the accuracy gain from `small` is worth the modest extra time.
 
 ## Error handling
 
