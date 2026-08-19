@@ -188,6 +188,18 @@ Use `--name-map` to relabel Discord usernames to real names in the output
 labeled, `--participants` is probably no longer needed there, though
 `--notes-file` is still worth using.
 
+**Verify the username→real-name mapping once, then reuse it.** Don't guess
+at `--name-map` from usernames alone — confirm each mapping against actual
+transcript content first (e.g. `grep` the merged transcript for something
+you know that person said). Confirmed in testing on a real recording:
+relabeling *before* summarization (so the transcript says "Heriz:" instead
+of "novemforxuz:") measurably improved attribution accuracy over passing
+`--participants` alone — the summarization model no longer has to resolve
+third-person references (e.g. one speaker calling another "Harris" mid-
+sentence) against a raw username at all. For a recurring meeting with the
+same people, verify the mapping once and reuse the same `--name-map` on
+every future run — no need to re-verify each time.
+
 **Heads up on runtime:** this transcribes N tracks independently, so it
 takes roughly N times as long as a single-file `transcribe.py` run at the
 same model size — a 5-person, ~30-minute meeting at `--model small` took
