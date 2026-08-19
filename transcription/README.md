@@ -155,6 +155,7 @@ Given an existing transcript (e.g. from a previous `transcribe.py` run):
 python summarize.py output\recording.txt
 python summarize.py output\recording.txt --model gpt-4o
 python summarize.py output\recording.txt --participants "James, Heriz, Sham, Marcus, Aaron"
+python summarize.py output\recording.txt --notes-file my_rough_notes.txt
 ```
 
 Produces structured Markdown notes with sections: Summary, Discussion
@@ -172,6 +173,21 @@ attribute action items correctly instead of dropping them or marking them
 if Whisper missed a name entirely, try adding it to `transcribe.py`'s
 `--initial-prompt` instead, so Whisper has a better shot at catching it in
 the first place.
+
+**Use `--notes-file`** if you also took your own rough notes during the
+meeting — this is the single biggest accuracy lever available. A raw
+Whisper transcript is often genuinely ambiguous even to a careful reader
+(confusing overlapping dialogue, names Whisper never caught at all, garbled
+deadline negotiations), and no amount of prompt tuning fully closes that
+gap from the transcript alone. Your notes give the model a ground-truth
+cross-reference: confirmed in testing that adding a short rough-notes file
+correctly surfaced an action item owner (Sham) who has zero recognizable
+mention anywhere in the Whisper transcript, and matched several other
+action items that a transcript-only run had missed or gotten vague. The
+notes don't need to be tidy — the shorthand you'd normally jot for
+yourself is enough; the model treats them as authoritative over the
+transcript when the two conflict, and uses the transcript to fill in
+detail your notes only summarized.
 
 ## Improving accuracy
 

@@ -11,6 +11,7 @@ Usage:
     python summarize.py path\to\transcript.txt
     python summarize.py path\to\transcript.txt --model gpt-4o
     python summarize.py path\to\transcript.txt --participants "James, Heriz, Sham, Marcus, Aaron"
+    python summarize.py path\to\transcript.txt --notes-file my_rough_notes.txt
 
 Requires OPENAI_API_KEY to be set, either as an environment variable or in a
 .env file in this folder. See README.md.
@@ -19,6 +20,12 @@ Tip: local Whisper transcription regularly mis-hears names (e.g. "Heriz"
 came through as "Harris"/"Harry's" in testing). Pass --participants with
 the real names so the model can map garbled transcript names back to the
 right person instead of dropping them or marking items "Unassigned".
+
+Tip: if you also have your own rough notes from the meeting, pass them with
+--notes-file. The transcript alone is often genuinely ambiguous (confusing
+back-and-forth, names Whisper never caught at all) — your notes give the
+model a ground-truth cross-reference, which measurably closes the gap vs.
+extracting blind from the transcript.
 
 Note: model names change over time — if the default below is deprecated by
 the time you read this, pass --model with a current one (check
@@ -49,6 +56,7 @@ DEFAULT_MODEL = "gpt-4o-mini"
 def make_timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
+
 SYSTEM_PROMPT = """You are an assistant that turns raw meeting transcripts into clear, \
 structured meeting notes. The transcript comes from local speech-to-text and may \
 contain transcription errors, especially on technical jargon and names — use \
@@ -69,6 +77,13 @@ person:
   that list instead of the garbled transcript version.
 - Only use "Unassigned" when the transcript genuinely gives no attribution signal \
   at all — prefer a best-effort attributed name over defaulting to Unassigned.
+
+If the user supplies their own rough meeting notes below, treat them as a \
+ground-truth cross-reference, not just extra color: prefer the notes' version of a \
+name, decision, or action item's owner/deadline whenever the transcript is garbled, \
+ambiguous, or contradicts them. Use the transcript to add detail and context the \
+notes only summarized, and to catch anything the notes missed — but when the two \
+genuinely conflict, the notes win.
 
 Structure your response as Markdown with these sections (omit a section only \
 if genuinely nothing in the transcript fits it):
@@ -124,6 +139,14 @@ def parse_args() -> argparse.Namespace:
         'Sham, Marcus, Aaron". Helps the model correctly attribute action items when '
         "Whisper has mis-transcribed names.",
     )
+    parser.add_argument(
+        "--notes-file",
+        type=str,
+        default=None,
+        help="Path to a text file with your own rough meeting notes. Used as a "
+        "ground-truth cross-reference for names/decisions/action items — closes "
+        "most of the gap vs. extracting blind from a noisy transcript.",
+    )
     return parser.parse_args()
 
 
@@ -138,6 +161,21 @@ def check_transcript_file(transcript_path: Path) -> str:
     text = transcript_path.read_text(encoding="utf-8").strip()
     if not text:
         print(f"ERROR: Transcript file is empty: {transcript_path}", file=sys.stderr)
+        sys.exit(1)
+    return text
+
+
+def check_notes_file(notes_file_path: str | None) -> str | None:
+    """Read an optional personal-notes file. Returns None if not given."""
+    if not notes_file_path:
+        return None
+    path = Path(notes_file_path).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        print(f"ERROR: Notes file not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        print(f"ERROR: Notes file is empty: {path}", file=sys.stderr)
         sys.exit(1)
     return text
 
@@ -175,6 +213,7 @@ def summarize_transcript(
     transcript_text: str,
     model: str = DEFAULT_MODEL,
     participants: str | None = None,
+    notes_text: str | None = None,
 ) -> str:
     """
     Call the OpenAI API to turn a transcript into structured meeting notes.
@@ -194,6 +233,11 @@ def summarize_transcript(
             f"Known participants in this meeting: {participants}\n"
             f"(Use these real names to correct any garbled/mis-transcribed names you "
             f"encounter in the transcript below.)\n\n{user_content}"
+        )
+    if notes_text:
+        user_content = (
+            f"My own rough notes from this meeting (treat as ground truth — see "
+            f"system instructions):\n\n{notes_text}\n\n{user_content}"
         )
 
     try:
@@ -236,6 +280,7 @@ def summarize_and_save(
     base_name: str,
     model: str = DEFAULT_MODEL,
     participants: str | None = None,
+    notes_text: str | None = None,
     output_dir: Path | None = None,
     timestamp: str | None = None,
 ) -> dict:
@@ -255,7 +300,9 @@ def summarize_and_save(
 
     print(f"Generating structured meeting notes with OpenAI ({model})...")
     start_time = time.perf_counter()
-    notes = summarize_transcript(transcript_text, model=model, participants=participants)
+    notes = summarize_transcript(
+        transcript_text, model=model, participants=participants, notes_text=notes_text
+    )
     elapsed = time.perf_counter() - start_time
 
     output_path.write_text(notes, encoding="utf-8")
@@ -275,11 +322,13 @@ def main() -> None:
     args = parse_args()
     transcript_path = Path(args.transcript_path).expanduser().resolve()
     transcript_text = check_transcript_file(transcript_path)
+    notes_text = check_notes_file(args.notes_file)
     summarize_and_save(
         transcript_text,
         transcript_path.stem,
         model=args.model,
         participants=args.participants,
+        notes_text=notes_text,
     )
 
 

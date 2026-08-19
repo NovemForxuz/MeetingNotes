@@ -14,6 +14,7 @@ Usage:
     python pipeline.py path\to\recording.flac --skip-summary
     python pipeline.py path\to\recording.flac --summary-model gpt-4o
     python pipeline.py path\to\recording.flac --participants "James, Heriz, Sham, Marcus, Aaron"
+    python pipeline.py path\to\recording.flac --notes-file my_rough_notes.txt
 
 Output (both saved under ./output/, sharing one timestamp so the pair is
 easy to spot):
@@ -77,6 +78,13 @@ def parse_args() -> argparse.Namespace:
         "when Whisper has mis-transcribed names.",
     )
     parser.add_argument(
+        "--notes-file",
+        type=str,
+        default=None,
+        help="Path to a text file with your own rough meeting notes, used as a "
+        "ground-truth cross-reference for the summarization step.",
+    )
+    parser.add_argument(
         "--skip-summary",
         action="store_true",
         help="Only run transcription; skip the OpenAI summarization step (e.g. if you don't "
@@ -108,11 +116,13 @@ def main() -> None:
     print("\n" + "=" * 60)
     print("STEP 2/2: SUMMARIZATION (OpenAI API, requires network)")
     print("=" * 60)
+    notes_text = summarize.check_notes_file(args.notes_file)
     summary_result = summarize.summarize_and_save(
         transcription_result["transcript"],
         audio_path.stem,
         model=args.summary_model,
         participants=args.participants,
+        notes_text=notes_text,
         timestamp=timestamp,
     )
 
