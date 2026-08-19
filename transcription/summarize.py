@@ -66,7 +66,10 @@ is obvious, but do not invent details the transcript doesn't support.
 This is a real multi-person meeting, not a monologue. Work to figure out who is \
 speaking and attribute discussion points and action items to the correct named \
 person:
-- Track whatever attribution signals the transcript actually gives: explicit \
+- If a line already starts with an explicit speaker label (e.g. "[00:12] Name: ..."), \
+  that label is ground truth from the recording setup, not a guess — trust it \
+  directly rather than re-inferring the speaker from context.
+- Otherwise, track whatever attribution signals the transcript actually gives: explicit \
   turn-calling ("next, X", "X, your turn"), a person being directly addressed by \
   name, someone referring to themselves ("so I...", "my part is..."), or a named \
   person's point being replied to or built on. Not every meeting is a structured \

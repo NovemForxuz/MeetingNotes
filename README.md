@@ -15,20 +15,21 @@ automatically doesn't exist yet.
 | [`transcription/`](transcription/) | Local Whisper transcription + OpenAI summarization pipeline | Working MVP — see testing below |
 | [`MeetingNotes.Api/`](MeetingNotes.Api/) | ASP.NET Core Web API scaffold | Default template scaffold only, not yet wired to the pipeline |
 | Discord bot integration | Watches a voice channel, records, triggers the pipeline | Not started |
-| Speaker diarization | Distinguishing who said what | Not started (Whisper alone doesn't do this) |
+| Speaker diarization | Distinguishing who said what | Solved for [Craig](https://craig.chat/) recordings via `transcribe_multitrack.py` (per-speaker tracks, no guessing needed); a single mixed-down file still relies on `transcribe.py`'s attribution heuristics |
 
 ## Repo structure
 
 ```
 MeetingNotes/
-├── transcription/       # Python: audio -> transcript -> structured notes
-│   ├── transcribe.py    # local Whisper transcription (offline)
-│   ├── summarize.py     # transcript -> Markdown notes (OpenAI API)
-│   ├── pipeline.py      # chains the two above
-│   ├── input/            # drop recordings here (gitignored); scripts auto-pick if path omitted
-│   ├── output/           # timestamped transcripts/notes land here (gitignored)
-│   └── README.md        # full setup/usage/troubleshooting details
-└── MeetingNotes.Api/    # ASP.NET Core Web API scaffold
+├── transcription/              # Python: audio -> transcript -> structured notes
+│   ├── transcribe.py           # local Whisper transcription, single file (offline)
+│   ├── transcribe_multitrack.py # local Whisper transcription, Craig multi-track export (offline)
+│   ├── summarize.py            # transcript -> Markdown notes (OpenAI API)
+│   ├── pipeline.py             # chains transcribe.py + summarize.py
+│   ├── input/                   # drop recordings here (gitignored); scripts auto-pick if path omitted
+│   ├── output/                  # timestamped transcripts/notes land here (gitignored)
+│   └── README.md               # full setup/usage/troubleshooting details
+└── MeetingNotes.Api/           # ASP.NET Core Web API scaffold
 ```
 
 ## Testing
@@ -79,6 +80,19 @@ For real (non-smoke-test) accuracy, `--model small` or larger is strongly
 recommended over the `base` default — see the "Improving accuracy" section
 in `transcription/README.md` for why, with real before/after examples.
 
+**4. Multi-track (Craig) transcription** — if you have a
+[Craig](https://craig.chat/) multi-track Discord export:
+
+```bash
+python transcribe_multitrack.py path\to\craig-export-folder --model small --language en
+```
+Expect a merged, chronological, speaker-labeled transcript (ground-truth
+speaker attribution, no guessing) saved to
+`output\<timestamp>_<recording name>_multitrack.txt`. Takes roughly N times
+as long as a single-file run (N = number of tracks) — see
+`transcription/README.md` for real timing and why extra hallucination
+filtering was needed here.
+
 ### `MeetingNotes.Api/` — the scaffold
 
 This is currently the unmodified `dotnet new webapi -controllers` template,
@@ -106,7 +120,9 @@ separately.
 
 1. Wire `MeetingNotes.Api` to the transcription pipeline (or decide it's
    not needed if the pipeline stays a standalone script/bot).
-2. Build the Discord bot: watch a voice channel, record, trigger
-   `pipeline.py` automatically.
-3. Add speaker diarization so multi-person meetings don't blend speakers
-   together in the transcript.
+2. Build the Discord bot: watch a voice channel, record with Craig
+   (multi-track), trigger `transcribe_multitrack.py` + `summarize.py`
+   automatically.
+3. Wire `transcribe_multitrack.py` into `pipeline.py` for one-command
+   convenience (currently a manual two-step: run it, then feed the output
+   into `summarize.py`).

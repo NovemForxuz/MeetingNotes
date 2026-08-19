@@ -5,13 +5,16 @@ into structured meeting notes, in two chained steps.
 
 | Script | Does what | Offline? |
 |---|---|---|
-| `transcribe.py` | Audio → text transcript, via local [Whisper](https://github.com/openai/whisper) | Yes — fully offline, no API calls |
+| `transcribe.py` | One audio file → text transcript, via local [Whisper](https://github.com/openai/whisper) | Yes — fully offline, no API calls |
+| `transcribe_multitrack.py` | A [Craig](https://craig.chat/) multi-track Discord export → one merged, speaker-labeled transcript | Yes — fully offline, no API calls |
 | `summarize.py` | Transcript → structured Markdown notes, via the OpenAI API | No — needs network + an API key |
-| `pipeline.py` | Runs both of the above in sequence | No (unless `--skip-summary`) |
+| `pipeline.py` | Runs `transcribe.py` + `summarize.py` in sequence | No (unless `--skip-summary`) |
 
 Each script also works standalone with its own CLI — `pipeline.py` just
 imports their reusable functions (`transcribe_audio()`, `summarize_and_save()`)
 and calls them one after another; it doesn't duplicate any logic.
+`transcribe_multitrack.py` isn't wired into `pipeline.py` yet — run it, then
+feed its output transcript into `summarize.py` manually (see below).
 
 ## Setup
 
@@ -146,6 +149,58 @@ The script also prints:
 - which device it used (GPU/CPU — auto-detected)
 - the language Whisper detected
 - how long transcription took, so you can gauge performance on your hardware
+
+### Multi-track transcription (Craig)
+
+If you record with the [Craig](https://craig.chat/) Discord bot, it captures
+each speaker to a **separate audio track** instead of one mixed-down file.
+That sidesteps `transcribe.py`'s single biggest limitation: on a mixed file,
+Whisper has to *guess* who's talking from context; with per-speaker tracks,
+we know who said what for free.
+
+In Discord, download the recording as `flac` (or `wav`/`mp3`/etc — any
+format `transcribe.py` supports) and extract the resulting `.zip`. You'll
+get a folder with `info.txt`, one audio file per speaker named
+`<track#>-<discord username>.<ext>`, and (ignorable for our purposes) a
+`raw.dat`. Point `transcribe_multitrack.py` at that folder:
+
+```bash
+python transcribe_multitrack.py path\to\craig-export-folder
+python transcribe_multitrack.py path\to\craig-export-folder --model small --language en
+python transcribe_multitrack.py path\to\craig-export-folder --name-map "novemforxuz=Heriz,shamgoh=Sham"
+```
+
+It transcribes each track independently (keeping per-segment timestamps,
+not just flattened text), drops segments that look like silence/
+hallucination on that track (see "Why the extra filtering" below), then
+merges every kept segment from every track into one chronological
+transcript:
+
+```
+[03:00] Heriz: the state escalation or like based on my three conditions.
+[03:34] Sham: ...
+```
+
+Use `--name-map` to relabel Discord usernames to real names in the output
+(usernames are used as-is if you skip it). Saved to
+`output\<timestamp>_<recording name>_multitrack.txt` — feed that into
+`summarize.py` exactly like a normal transcript. Since speakers are already
+labeled, `--participants` is probably no longer needed there, though
+`--notes-file` is still worth using.
+
+**Heads up on runtime:** this transcribes N tracks independently, so it
+takes roughly N times as long as a single-file `transcribe.py` run at the
+same model size — a 5-person, ~30-minute meeting at `--model small` took
+this project's real test run on the order of tens of minutes on CPU.
+Consider running it in the background.
+
+**Why the extra filtering:** every track spans the *entire* meeting, most
+of which is silence for any one speaker. Whisper's `no_speech_prob` alone
+didn't catch everything in testing — background noise/breathing that isn't
+silence but also isn't real speech produced fabricated text with reported
+low `no_speech_prob` but very low confidence (`avg_logprob` measured around
+-4.8 on real garbage output here, vs. -0.6 to -0.9 for genuine speech).
+`transcribe_multitrack.py` filters on both.
 
 ### Summarization only
 
