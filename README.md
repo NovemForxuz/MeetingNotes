@@ -63,9 +63,13 @@ meeting.
 ```bash
 python summarize.py output\<timestamp>_<filename>.txt
 ```
-Expect: structured Markdown notes (Summary / Discussion / Decisions Made /
-Action Items / Milestones / Open Questions) printed to console and saved to
-`output\<new timestamp>_<filename>_notes.md`.
+Expect: three passes printed as they run (extract → organize → verify —
+this is deliberate, see `transcription/README.md` "Avoiding dropped
+content"), then structured Markdown notes (Summary / Discussion / Decisions
+Made / Action Items / Milestones / Open Questions) printed to console and
+saved to `output\<new timestamp>_<filename>_notes.md`. Takes roughly 3x
+longer/more API calls than a single-shot summary would — pass
+`--single-pass` to trade completeness for speed on quick/low-stakes runs.
 
 **3. Full pipeline** (both steps chained):
 

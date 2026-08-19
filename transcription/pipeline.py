@@ -85,6 +85,13 @@ def parse_args() -> argparse.Namespace:
         "ground-truth cross-reference for the summarization step.",
     )
     parser.add_argument(
+        "--single-pass",
+        action="store_true",
+        help="Skip summarize.py's three-pass extract/organize/verify pipeline for one "
+        "direct call instead. Faster/cheaper, but confirmed in testing to drop real "
+        "content on long transcripts.",
+    )
+    parser.add_argument(
         "--skip-summary",
         action="store_true",
         help="Only run transcription; skip the OpenAI summarization step (e.g. if you don't "
@@ -123,6 +130,7 @@ def main() -> None:
         model=args.summary_model,
         participants=args.participants,
         notes_text=notes_text,
+        single_pass=args.single_pass,
         timestamp=timestamp,
     )
 

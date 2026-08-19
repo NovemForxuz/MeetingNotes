@@ -256,6 +256,44 @@ yourself is enough; the model treats them as authoritative over the
 transcript when the two conflict, and uses the transcript to fill in
 detail your notes only summarized.
 
+### Avoiding dropped content
+
+Asking a model to summarize a long transcript into a polished template in
+**one pass** has a real failure mode: it naturally compresses, quietly
+dropping minor-seeming details — a single throwaway line ("I'll start
+NLP benchmarking tonight"), or a decision buried after an unrelated
+tangent. This isn't specific to any one provider; it's how single-pass
+summarization behaves on long input generally.
+
+`summarize.py` runs a **three-pass pipeline by default** to counter this:
+
+1. **Extract** — go through the entire transcript and pull out every
+   distinct point as a flat, unpolished bullet, explicitly instructed to
+   over-include rather than compress. No organizing yet.
+2. **Organize** — take that raw extraction (not the original transcript)
+   and structure it into the final Markdown template.
+3. **Verify** — diff the drafted notes against the raw extraction from
+   step 1, and backfill anything present in the extraction but missing
+   from the draft.
+
+Step 3 exists because step 2 alone isn't reliable enough on its own:
+confirmed in testing on a real ~30-minute, 5-person transcript that step 2
+still dropped a decision (a UAT branch policy) and an action item (NLP
+benchmarking) that were both cleanly present in step 1's extraction,
+despite explicit "never drop a bullet" instructions. Step 3 caught both.
+
+One caveat found in the same test: step 3 fixed the *dropped content*
+completely, but occasionally misattributes *who* said something when it
+backfills a missing point near a speaker transition (attributed a line to
+the wrong person, one line after the real speaker started talking). Real
+progress — nothing is silently lost anymore — but not perfect person-level
+attribution on every line.
+
+This triples the API calls (and roughly triples cost/latency) vs. a single
+call. Pass `--single-pass` to skip straight to one direct call if you'd
+rather trade completeness for speed/cost — confirmed to drop real content
+on long transcripts, so only use it for quick/low-stakes runs.
+
 ## Improving accuracy
 
 The `base` model badly mangles technical/domain jargon — confirmed on a real
