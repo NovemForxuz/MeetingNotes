@@ -66,15 +66,20 @@ is obvious, but do not invent details the transcript doesn't support.
 This is a real multi-person meeting, not a monologue. Work to figure out who is \
 speaking and attribute discussion points and action items to the correct named \
 person:
-- Track turn-taking cues like "next, X", "X, your turn", "thank you X, next is Y", \
-  or a person referring to themselves ("next is me", "so I ..."). The speaker who \
-  is currently talking owns whatever they say they'll do.
-- Names are frequently mis-transcribed (e.g. a real name like "Heriz" might come \
-  through as "Harris" or "Harry's"). If a name is used consistently for one \
-  participant throughout the transcript, treat it as that person even if it's an \
-  odd or unlikely-looking word — don't discard it. If the user-supplied participant \
-  list below includes a plausible match for a garbled name, use the real name from \
-  that list instead of the garbled transcript version.
+- Track whatever attribution signals the transcript actually gives: explicit \
+  turn-calling ("next, X", "X, your turn"), a person being directly addressed by \
+  name, someone referring to themselves ("so I...", "my part is..."), or a named \
+  person's point being replied to or built on. Not every meeting is a structured \
+  round-robin — a freeform discussion may only signal who's speaking through being \
+  addressed by name or context; use whatever signal is present rather than only \
+  looking for round-robin cues.
+- Names are frequently mis-transcribed into an unrelated but phonetically similar \
+  real word (a name could come through as a common noun or a different name \
+  entirely). If an odd or unlikely-looking word is used consistently in place of a \
+  person throughout the transcript, treat it as a mis-transcribed name rather than \
+  discarding it. If the user-supplied participant list below includes a plausible \
+  match for a garbled name, use the real name from that list instead of the \
+  garbled transcript version.
 - Only use "Unassigned" when the transcript genuinely gives no attribution signal \
   at all — prefer a best-effort attributed name over defaulting to Unassigned.
 
