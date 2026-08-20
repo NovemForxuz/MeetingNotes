@@ -45,7 +45,7 @@ INPUT_DIR = Path(__file__).parent / "input"
 
 
 def make_timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    return datetime.now().strftime("%Y%m%d_%H%M")
 
 
 def resolve_audio_path(audio_arg: str | None) -> Path:

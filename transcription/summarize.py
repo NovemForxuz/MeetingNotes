@@ -66,7 +66,7 @@ DEFAULT_MODEL = "gpt-4o-mini"
 
 
 def make_timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    return datetime.now().strftime("%Y%m%d_%H%M")
 
 
 # --- Pass 1: exhaustive extraction (favor completeness over organization) ---

@@ -100,15 +100,21 @@ committed.
 
 ### Output filenames
 
-Every run prefixes its output filename with a timestamp
-(`YYYYMMDD_HHMMSS_`), so repeated runs never silently overwrite each
-other. `pipeline.py` uses one shared timestamp for both the transcript and
-the notes file, so the pair is easy to spot together, e.g.:
+Every run prefixes its output filename with a timestamp (`YYYYMMDD_HHMM_`,
+minute resolution — not down to the second), so repeated runs on
+different days/minutes don't overwrite each other. `pipeline.py` uses one
+shared timestamp for both the transcript and the notes file, so the pair
+is easy to spot together, e.g.:
 
 ```
-output/20260818_225216_recording.txt
-output/20260818_225216_recording_notes.md
+output/20260818_2252_recording.txt
+output/20260818_2252_recording_notes.md
 ```
+
+Note: two runs started in the *same* minute will collide and overwrite
+each other, since there's no seconds component — unlikely in normal use
+(you're not usually running the pipeline twice a minute apart), but worth
+knowing if you're scripting rapid repeated test runs.
 
 ### Full pipeline (transcribe + summarize)
 
