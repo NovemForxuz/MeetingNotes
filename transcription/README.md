@@ -498,11 +498,29 @@ attaching a `.txt` of your own rough notes for that meeting via the
 `notes` parameter — `/meetingnotes url:<link> notes:<attach file>`. If
 you skip `notes`, it falls back to `MEETING_NOTES_FILE` from `.env`; a
 per-meeting attachment always takes priority over that static default.
-The bot acks immediately, then posts progress updates and finally the
-notes file once done. Expect it to take roughly as long as running
-`pipeline.py` manually on the same recording (see "Multi-track
-transcription (Craig)" above for real timing) — this is not fast, it's
-just hands-off.
+The bot acks immediately, then posts one message it keeps editing in
+place with a live progress bar and elapsed time — e.g.:
+
+```
+Step 2/2: Transcribing + summarizing
+[##########----------] 50% — transcribing track 3/5
+Elapsed: 12m 4s
+```
+
+Two real progress signals drive this, not a fake spinner: Craig's own
+cook-job API reports per-track encoding percentages during Step 1
+(`craig_client.estimate_cook_progress()`), and Step 2's progress comes
+from parsing the pipeline's own stdout for track/pass markers
+(`discord_bot.parse_pipeline_progress()`) — weighted 90/10
+transcription/summarization, matching real observed timing where
+transcription dominates the wall-clock time. Edits are throttled (a few
+seconds apart) to stay clear of Discord's rate limits, with a periodic
+auto-refresh so elapsed time keeps moving even between real progress
+events (e.g. while a Whisper model is loading). Expect the whole thing to
+take roughly as long as running `pipeline.py` manually on the same
+recording (see "Multi-track transcription (Craig)" above for real
+timing) — this is not fast, it's just hands-off, with an honest bar
+showing where it actually is.
 
 ### What's confirmed
 

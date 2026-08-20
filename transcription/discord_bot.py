@@ -38,14 +38,17 @@ Setup:
     4. pip install -r requirements.txt (adds discord.py, aiohttp)
     5. python discord_bot.py — leave it running during/after your meeting.
 
-This has not been tested against a real live Craig recording yet. Treat
-the first real run as a live test.
+craig_client.py's API calls have been verified against a real live
+recording (see its docstring/README). The bot's own Discord-facing flow
+(slash command, progress bar, file attachments) is still worth a live
+`/meetingnotes` run to confirm end-to-end.
 """
 
 import asyncio
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import discord
@@ -72,6 +75,37 @@ BOT_WORK_DIR = Path(__file__).parent / "input" / "_bot_jobs"
 
 SAVED_NOTES_RE = re.compile(r"Saved meeting notes to: (.+)")
 SAVED_TRANSCRIPT_RE = re.compile(r"Saved (?:merged transcript|transcript) to: (.+)")
+
+# Recognized lines from transcribe_multitrack.py / summarize.py's own stdout,
+# used to derive a live progress fraction for the combined "transcribe +
+# summarize" stage. Weighted 90/10 transcription/summarization, matching real
+# observed timing (e.g. a real ~31 min, 5-track meeting: ~38 min transcribing
+# vs ~1-2 min summarizing) — transcription dominates the wall-clock time.
+TRACK_PROGRESS_RE = re.compile(r"Transcribing track (\d+)/(\d+)")
+PASS_PROGRESS_RE = re.compile(r"Pass (\d+)/3")
+
+
+def parse_pipeline_progress(line: str) -> tuple | None:
+    """Return (fraction, label) if line is a recognized progress marker, else None."""
+    match = TRACK_PROGRESS_RE.search(line)
+    if match:
+        done, total = int(match.group(1)), int(match.group(2))
+        return 0.9 * (done / total), f"transcribing track {done}/{total}"
+
+    match = PASS_PROGRESS_RE.search(line)
+    if match:
+        current = int(match.group(1))
+        return 0.9 + 0.1 * (current / 3), f"summarizing (pass {current}/3)"
+
+    if "Loading Whisper model" in line:
+        return 0.02, "loading Whisper model"
+    if line.startswith("Found ") and "track" in line:
+        return 0.03, "starting transcription"
+    if "Transcribing '" in line:  # single-file (non-multitrack) path
+        return 0.1, "transcribing"
+    if "Generating structured meeting notes" in line:
+        return 0.9, "summarizing"
+    return None
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
@@ -111,6 +145,97 @@ async def send_safe(channel, content: str, **kwargs) -> None:
     await channel.send(content, **kwargs)
 
 
+def format_bar(fraction: float, width: int = 20) -> str:
+    fraction = max(0.0, min(1.0, fraction))
+    filled = round(fraction * width)
+    return "`[" + "#" * filled + "-" * (width - filled) + f"]` {fraction * 100:.0f}%"
+
+
+def format_elapsed(seconds: float) -> str:
+    total = int(seconds)
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+class ProgressReporter:
+    """
+    Wraps a single Discord message, edited in place, to show a live
+    stage/progress-bar/elapsed-time indicator instead of a wall of separate
+    status messages. Auto-refreshes on a timer too, so elapsed time keeps
+    moving even between real progress events (e.g. while Whisper is loading
+    a model, with no line of output for a while).
+
+    Edits are throttled (MIN_EDIT_INTERVAL) to stay well clear of Discord's
+    per-channel/per-message rate limits regardless of how often update() is
+    called from real progress events.
+    """
+
+    MIN_EDIT_INTERVAL = 4.0  # seconds
+
+    def __init__(self, message: discord.Message, refresh_seconds: float = 12.0):
+        self.message = message
+        self.start_time = time.monotonic()
+        self.stage = "Starting..."
+        self.fraction = 0.0
+        self.label = ""
+        self._last_edit = 0.0
+        self._refresh_seconds = refresh_seconds
+        self._refresh_task: asyncio.Task | None = None
+
+    def start_auto_refresh(self) -> None:
+        self._refresh_task = asyncio.create_task(self._auto_refresh_loop())
+
+    def stop_auto_refresh(self) -> None:
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            self._refresh_task = None
+
+    async def _auto_refresh_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._refresh_seconds)
+                await self._render(force=True)
+        except asyncio.CancelledError:
+            pass
+
+    def render_text(self) -> str:
+        elapsed = format_elapsed(time.monotonic() - self.start_time)
+        bar = format_bar(self.fraction)
+        suffix = f" — {self.label}" if self.label else ""
+        return f"**{self.stage}**\n{bar}{suffix}\nElapsed: {elapsed}"
+
+    async def _render(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and (now - self._last_edit) < self.MIN_EDIT_INTERVAL:
+            return
+        self._last_edit = now
+        try:
+            await self.message.edit(content=self.render_text())
+        except discord.HTTPException:
+            pass  # a failed/rate-limited edit shouldn't take down the whole job
+
+    async def update(self, stage: str | None = None, fraction: float | None = None, label: str | None = None) -> None:
+        if stage is not None:
+            self.stage = stage
+        if fraction is not None:
+            self.fraction = fraction
+        if label is not None:
+            self.label = label
+        await self._render()
+
+    async def finish(self, final_text: str) -> None:
+        self.stop_auto_refresh()
+        try:
+            await self.message.edit(content=final_text)
+        except discord.HTTPException:
+            pass
+
+
 def check_config() -> None:
     if not BOT_TOKEN:
         print(
@@ -143,6 +268,10 @@ async def meetingnotes(interaction: discord.Interaction, url: str, notes: discor
 
 async def process_recording(url: str, channel, notes_attachment=None) -> None:
     job_dir = BOT_WORK_DIR / f"job_{transcribe.make_timestamp()}"
+    overall_start = time.monotonic()
+    progress_message = await channel.send("**Starting...**\n" + format_bar(0.0) + "\nElapsed: 0s")
+    reporter = ProgressReporter(progress_message)
+    reporter.start_auto_refresh()
     try:
         notes_file_override = None
         if notes_attachment is not None:
@@ -151,18 +280,28 @@ async def process_recording(url: str, channel, notes_attachment=None) -> None:
             await notes_attachment.save(notes_file_override)
             await channel.send(f"Using your attached notes ({notes_attachment.filename}) for this meeting.")
 
-        await channel.send("Step 1/2: fetching and cooking the recording from Craig...")
+        await reporter.update(stage="Step 1/2: Fetching & cooking from Craig", fraction=0.0)
         try:
-            recording_dir = await craig_client.fetch_and_extract_recording(url, job_dir)
+            recording_dir = await craig_client.fetch_and_extract_recording(
+                url, job_dir, on_progress=lambda frac, label: reporter.update(fraction=frac, label=label)
+            )
         except craig_client.CraigError as exc:
+            await reporter.finish(f"❌ Failed at Step 1/2 (fetching from Craig) after {format_elapsed(time.monotonic() - overall_start)}.")
             await send_safe(channel, f"❌ Couldn't fetch the recording from Craig: {exc}")
             return
 
-        await channel.send("Step 2/2: transcribing + summarizing (this is the slow part)...")
-        stdout_text, returncode = await run_pipeline(recording_dir, notes_file_override)
+        await reporter.update(stage="Step 2/2: Transcribing + summarizing", fraction=0.0, label="starting")
+
+        async def on_line(line: str) -> None:
+            parsed = parse_pipeline_progress(line)
+            if parsed:
+                await reporter.update(fraction=parsed[0], label=parsed[1])
+
+        stdout_text, returncode = await run_pipeline(recording_dir, notes_file_override, on_line=on_line)
 
         if returncode != 0:
             tail = "\n".join(stdout_text.splitlines()[-25:])
+            await reporter.finish(f"❌ Failed at Step 2/2 after {format_elapsed(time.monotonic() - overall_start)}.")
             await send_safe(
                 channel, f"❌ Pipeline failed (exit code {returncode}). Last output:\n```\n{tail}\n```"
             )
@@ -170,6 +309,7 @@ async def process_recording(url: str, channel, notes_attachment=None) -> None:
 
         notes_match = SAVED_NOTES_RE.search(stdout_text)
         if not notes_match:
+            await reporter.finish(f"⚠️ Finished after {format_elapsed(time.monotonic() - overall_start)}, but something's off.")
             await channel.send(
                 "⚠️ Pipeline finished but I couldn't find the notes file path in its output. "
                 "Check the output/ folder directly."
@@ -178,17 +318,21 @@ async def process_recording(url: str, channel, notes_attachment=None) -> None:
 
         notes_path = Path(notes_match.group(1).strip())
         if not notes_path.exists():
+            await reporter.finish(f"⚠️ Finished after {format_elapsed(time.monotonic() - overall_start)}, but something's off.")
             await send_safe(channel, f"⚠️ Pipeline reported notes at `{notes_path}` but that file doesn't exist.")
             return
 
+        total_elapsed = format_elapsed(time.monotonic() - overall_start)
+        await reporter.finish(f"✅ **Done in {total_elapsed}!**")
         await channel.send(
-            content="✅ Done! Meeting notes:",
+            content="Meeting notes:",
             file=discord.File(notes_path, filename=notes_path.name),
         )
         # Downloaded audio can be large (100+ MB across tracks) — clean it up now that
         # we've succeeded. Left in place on any failure path above, for debugging.
         cleanup_job_dir(job_dir)
     except Exception as exc:  # noqa: BLE001 - last resort: report, don't let the bot process die
+        await reporter.finish(f"❌ Unexpected error after {format_elapsed(time.monotonic() - overall_start)}.")
         await send_safe(channel, f"❌ Unexpected error processing that recording: {exc}")
 
 
@@ -217,12 +361,16 @@ def participants_from_name_map(name_map: str | None) -> str | None:
     return ", ".join(names) if names else None
 
 
-async def run_pipeline(recording_dir: Path, notes_file_override: Path | None = None) -> tuple:
+async def run_pipeline(recording_dir: Path, notes_file_override: Path | None = None, on_line=None) -> tuple:
     """
     Run pipeline.py as a subprocess against recording_dir. Returns (stdout+stderr, returncode).
 
     notes_file_override: a per-meeting notes file (from /meetingnotes' optional
     attachment) takes priority over the static MEETING_NOTES_FILE from .env.
+
+    on_line, if given, is awaited with each line of output as it's produced
+    (not just after the whole subprocess finishes), so callers can drive a
+    live progress indicator — see parse_pipeline_progress().
     """
     args = [
         sys.executable,
@@ -249,8 +397,19 @@ async def run_pipeline(recording_dir: Path, notes_file_override: Path | None = N
         stderr=asyncio.subprocess.STDOUT,
         cwd=str(Path(__file__).parent),
     )
-    stdout_bytes, _ = await process.communicate()
-    return stdout_bytes.decode("utf-8", errors="replace"), process.returncode
+
+    lines = []
+    while True:
+        raw_line = await process.stdout.readline()
+        if not raw_line:
+            break
+        line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
+        lines.append(line)
+        if on_line:
+            await on_line(line)
+
+    returncode = await process.wait()
+    return "\n".join(lines), returncode
 
 
 @client.event
