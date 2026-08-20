@@ -9,6 +9,8 @@ into structured meeting notes, in two chained steps.
 | `transcribe_multitrack.py` | A [Craig](https://craig.chat/) multi-track Discord export → one merged, speaker-labeled transcript | Yes — fully offline, no API calls |
 | `summarize.py` | Transcript → structured Markdown notes, via the OpenAI API | No — needs network + an API key |
 | `pipeline.py` | Runs the right transcription step (single-file or Craig multi-track, auto-detected) + `summarize.py` in sequence | No (unless `--skip-summary`) |
+| `craig_client.py` | Fetches/cooks/downloads a recording from Craig's (undocumented) API, given a link you paste in | No — talks to craig.chat |
+| `discord_bot.py` | Discord bot: paste a Craig link, get notes posted back in-channel — wraps `craig_client.py` + `pipeline.py` | No |
 
 Each script also works standalone with its own CLI — `pipeline.py` just
 imports their reusable functions (`transcribe_audio()`, `transcribe_multitrack()`,
@@ -408,3 +410,80 @@ stack trace:
   you read this — pass `--model` with a current one), other API-side errors
 
 `pipeline.py` surfaces whichever of the above happens, from either step.
+
+## Discord bot (automated posting)
+
+`discord_bot.py` turns a pasted Craig recording link into meeting notes
+posted back into the channel — automating everything *after* the one
+manual step that can't be automated away for free (see below for why).
+
+### Why there's still a manual step
+
+Craig has no public API for third-party bots, and it deliberately keeps a
+recording's `id`+`key` private — DMed to whoever ran `/join` (or shown
+only to them as a fallback if the DM fails). This was confirmed by reading
+Craig's own open-source code directly
+([CraigChat/craig](https://github.com/CraigChat/craig)), not from any
+public docs (there aren't any for this). No workaround exists — a bot
+cannot start someone else's recording or intercept that private link. The
+one thing Craig does expose, also confirmed the same way, is a real,
+scriptable download API (`/api/recording/:id?key=...` for metadata,
+`/cook` to transcode into per-speaker FLAC, then a `/dl/<file>` route for
+the bytes) — that's what `craig_client.py` automates.
+
+So the real workflow is:
+
+1. **You run `/join` and `/stop` in Discord, same as ever.**
+2. **You paste the recording link Craig gives you into `/meetingnotes`.**
+3. Everything else is automatic: cook into per-speaker FLAC, download,
+   extract, transcribe, three-pass summarize, and post the result back
+   into the channel as a file.
+
+### Setup
+
+1. Create a bot at https://discord.com/developers/applications → New
+   Application → Bot → Reset Token (copy it). Under OAuth2 → URL
+   Generator, check `bot` and `applications.commands` scopes, and under
+   Bot Permissions check `View Channel`, `Send Messages`, `Attach Files`.
+   Use the generated URL to invite it to your server.
+2. Add to `transcription/.env`:
+   ```
+   DISCORD_BOT_TOKEN=your-bot-token-here
+   CRAIG_NAME_MAP=discord_username1=Real Name1,discord_username2=Real Name2
+   MEETING_NOTES_FILE=C:\path\to\your_rough_notes.txt
+   ```
+   The last two are optional but recommended — same purpose as
+   `pipeline.py`'s `--name-map`/`--notes-file` flags, just set once instead
+   of typed into Discord each time.
+3. `pip install -r requirements.txt` (adds `discord.py`, `aiohttp`).
+4. `python discord_bot.py` — leave it running during/after your meeting.
+
+### Usage
+
+In Discord: `/meetingnotes url:<the link Craig gave you>`. The bot acks
+immediately, then posts progress updates and finally the notes file once
+done. Expect it to take roughly as long as running `pipeline.py` manually
+on the same recording (see "Multi-track transcription (Craig)" above for
+real timing) — this is not fast, it's just hands-off.
+
+### What's confirmed vs. what isn't yet
+
+The Craig API integration (`craig_client.py`) was built by reading Craig's
+route handlers directly, not by testing against a live recording — the
+exact request/response shapes for `/cook` and `/dl/` are my best
+reconstruction from source, not a proven-working path yet. The subprocess
+wiring to `pipeline.py` (argument passing, output parsing, error handling)
+**was** verified end-to-end with a real (synthetic) test recording before
+this was written up. **Treat your first real `/meetingnotes` run as a live
+test of the Craig API piece specifically** — if `craig_client.py` doesn't
+match Craig's actual behavior, the bot will report a clear error (it's
+written to surface Craig's raw API response on failure) rather than fail
+silently, but it hasn't been proven against the real thing yet.
+
+Also worth knowing: `discord_bot.py` deliberately shells out to
+`pipeline.py` as a **separate process** rather than importing its
+functions directly. `transcribe_multitrack.py`/`summarize.py` call
+`sys.exit()` on errors by design — correct for a one-shot CLI script, but
+importing them in-process here would mean a single failed meeting could
+kill the bot for every future meeting too. A subprocess crashing is just
+one failed job; the bot itself stays up.

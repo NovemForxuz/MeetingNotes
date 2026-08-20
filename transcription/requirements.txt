@@ -13,3 +13,8 @@ torch
 # this part is NOT offline and requires an OPENAI_API_KEY.
 openai
 python-dotenv
+
+# Discord bot (discord_bot.py / craig_client.py) — requires DISCORD_BOT_TOKEN.
+# craig_client.py talks to Craig's undocumented recording API over HTTP.
+discord.py>=2.3
+aiohttp
