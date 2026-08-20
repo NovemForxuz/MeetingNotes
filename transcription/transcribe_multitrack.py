@@ -127,17 +127,19 @@ def parse_name_map(name_map_arg: str | None) -> dict:
     return mapping
 
 
-def discover_tracks(craig_dir: Path) -> list:
+def find_tracks(craig_dir: Path) -> list:
     """
-    Find per-speaker audio files in a Craig export folder.
+    Find per-speaker audio files in a folder, matching Craig's naming
+    convention ("<track#>-<discord username>.<ext>", per info.txt).
 
-    Craig names them "<track#>-<discord username>.<ext>" (per info.txt).
     Returns a list of (track_number, username, path) tuples sorted by
-    track number. Exits with a clear error if none are found.
+    track number — empty if the folder doesn't exist or has no matching
+    files. Does not exit the process; used both by discover_tracks()
+    (CLI-facing, errors loudly) and by pipeline.py to non-destructively
+    check whether a folder looks like a Craig export at all.
     """
     if not craig_dir.exists() or not craig_dir.is_dir():
-        print(f"ERROR: Not a folder: {craig_dir}", file=sys.stderr)
-        sys.exit(1)
+        return []
 
     tracks = []
     for path in craig_dir.iterdir():
@@ -149,6 +151,17 @@ def discover_tracks(craig_dir: Path) -> list:
         track_number, username = match.groups()
         tracks.append((int(track_number), username, path))
 
+    tracks.sort(key=lambda t: t[0])
+    return tracks
+
+
+def discover_tracks(craig_dir: Path) -> list:
+    """CLI-facing wrapper around find_tracks() that exits with a clear error if none are found."""
+    if not craig_dir.exists() or not craig_dir.is_dir():
+        print(f"ERROR: Not a folder: {craig_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    tracks = find_tracks(craig_dir)
     if not tracks:
         print(
             f"ERROR: No per-speaker audio files found in {craig_dir}.\n"
@@ -157,8 +170,6 @@ def discover_tracks(craig_dir: Path) -> list:
             file=sys.stderr,
         )
         sys.exit(1)
-
-    tracks.sort(key=lambda t: t[0])
     return tracks
 
 

@@ -8,13 +8,14 @@ into structured meeting notes, in two chained steps.
 | `transcribe.py` | One audio file → text transcript, via local [Whisper](https://github.com/openai/whisper) | Yes — fully offline, no API calls |
 | `transcribe_multitrack.py` | A [Craig](https://craig.chat/) multi-track Discord export → one merged, speaker-labeled transcript | Yes — fully offline, no API calls |
 | `summarize.py` | Transcript → structured Markdown notes, via the OpenAI API | No — needs network + an API key |
-| `pipeline.py` | Runs `transcribe.py` + `summarize.py` in sequence | No (unless `--skip-summary`) |
+| `pipeline.py` | Runs the right transcription step (single-file or Craig multi-track, auto-detected) + `summarize.py` in sequence | No (unless `--skip-summary`) |
 
 Each script also works standalone with its own CLI — `pipeline.py` just
-imports their reusable functions (`transcribe_audio()`, `summarize_and_save()`)
-and calls them one after another; it doesn't duplicate any logic.
-`transcribe_multitrack.py` isn't wired into `pipeline.py` yet — run it, then
-feed its output transcript into `summarize.py` manually (see below).
+imports their reusable functions (`transcribe_audio()`, `transcribe_multitrack()`,
+`summarize_and_save()`) and calls them in sequence; it doesn't duplicate any
+logic. Point it at either a single audio file or a Craig export folder — it
+detects which one you gave it and routes to the right transcription step
+automatically (see "Multi-track transcription (Craig)" below).
 
 ## Setup
 
@@ -109,13 +110,19 @@ output/20260818_225216_recording_notes.md
 
 ### Full pipeline (transcribe + summarize)
 
+Works with either a single audio file or a Craig multi-track export
+folder — `pipeline.py` detects which one you gave it automatically:
+
 ```bash
 python pipeline.py path\to\recording.flac
+python pipeline.py path\to\craig-export-folder
 python pipeline.py path\to\recording.flac --model small --language en --initial-prompt "Docker, Git, MVP"
+python pipeline.py path\to\craig-export-folder --name-map "novemforxuz=Heriz,shamgoh=Sham"
 python pipeline.py path\to\recording.flac --skip-summary   # transcription only, no API key needed
 ```
 
-Saves both `output\<timestamp>_<name>.txt` (transcript) and
+Saves both the transcript (`output\<timestamp>_<name>.txt` for a single
+file, `..._multitrack.txt` for a Craig folder) and
 `output\<timestamp>_<name>_notes.md` (structured notes).
 
 ### Transcription only
@@ -162,12 +169,14 @@ In Discord, download the recording as `flac` (or `wav`/`mp3`/etc — any
 format `transcribe.py` supports) and extract the resulting `.zip`. You'll
 get a folder with `info.txt`, one audio file per speaker named
 `<track#>-<discord username>.<ext>`, and (ignorable for our purposes) a
-`raw.dat`. Point `transcribe_multitrack.py` at that folder:
+`raw.dat`. Point `pipeline.py` (or `transcribe_multitrack.py` directly, for
+transcription only) at that folder — it auto-detects a folder vs. a single
+file and routes accordingly, no separate command needed:
 
 ```bash
-python transcribe_multitrack.py path\to\craig-export-folder
-python transcribe_multitrack.py path\to\craig-export-folder --model small --language en
-python transcribe_multitrack.py path\to\craig-export-folder --name-map "novemforxuz=Heriz,shamgoh=Sham"
+python pipeline.py path\to\craig-export-folder
+python pipeline.py path\to\craig-export-folder --model small --language en --name-map "novemforxuz=Heriz,shamgoh=Sham"
+python transcribe_multitrack.py path\to\craig-export-folder --model small   # transcription only, no API key needed
 ```
 
 It transcribes each track independently (keeping per-segment timestamps,
@@ -183,9 +192,10 @@ transcript:
 
 Use `--name-map` to relabel Discord usernames to real names in the output
 (usernames are used as-is if you skip it). Saved to
-`output\<timestamp>_<recording name>_multitrack.txt` — feed that into
-`summarize.py` exactly like a normal transcript. Since speakers are already
-labeled, `--participants` is probably no longer needed there, though
+`output\<timestamp>_<recording name>_multitrack.txt`, then automatically
+fed into `summarize.py`'s three-pass pipeline (same as the single-file
+path) unless you pass `--skip-summary`. Since speakers are already
+labeled, `--participants` is probably no longer needed, though
 `--notes-file` is still worth using.
 
 **Verify the username→real-name mapping once, then reuse it.** Don't guess
