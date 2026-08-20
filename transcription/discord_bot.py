@@ -170,6 +170,22 @@ def cleanup_job_dir(job_dir: Path) -> None:
         pass  # best-effort; leftover disk usage isn't worth failing the job over
 
 
+def participants_from_name_map(name_map: str | None) -> str | None:
+    """
+    Derive a --participants value from CRAIG_NAME_MAP's real-name side, so
+    the summarization step gets both signals (relabeled transcript AND an
+    explicit participant list) without a second config variable to keep in
+    sync. E.g. "user1=Name1,user2=Name2" -> "Name1, Name2".
+    """
+    if not name_map:
+        return None
+    names = []
+    for pair in name_map.split(","):
+        if "=" in pair:
+            names.append(pair.split("=", 1)[1].strip())
+    return ", ".join(names) if names else None
+
+
 async def run_pipeline(recording_dir: Path) -> tuple:
     """Run pipeline.py as a subprocess against recording_dir. Returns (stdout+stderr, returncode)."""
     args = [
@@ -183,6 +199,9 @@ async def run_pipeline(recording_dir: Path) -> tuple:
     ]
     if DEFAULT_NAME_MAP:
         args += ["--name-map", DEFAULT_NAME_MAP]
+        participants = participants_from_name_map(DEFAULT_NAME_MAP)
+        if participants:
+            args += ["--participants", participants]
     if DEFAULT_NOTES_FILE:
         args += ["--notes-file", DEFAULT_NOTES_FILE]
 

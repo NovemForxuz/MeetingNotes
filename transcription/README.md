@@ -467,7 +467,15 @@ So the real workflow is:
    ```
    The last two are optional but recommended — same purpose as
    `pipeline.py`'s `--name-map`/`--notes-file` flags, just set once instead
-   of typed into Discord each time.
+   of typed into Discord each time. If `CRAIG_NAME_MAP` is set, the bot
+   also automatically derives `--participants` from its real-name side and
+   passes both to the summarization step — confirmed in testing that
+   relabeling the transcript alone isn't always enough on its own; without
+   `CRAIG_NAME_MAP` set, a real run split two people into duplicate
+   identities (e.g. "Madooshik95" and "Aaron" shown as separate people in
+   Discussion, when they're the same speaker) because the summarizer had
+   no way to link a raw Discord username to a name mentioned elsewhere in
+   context.
 3. `pip install -r requirements.txt` (adds `discord.py`, `aiohttp`).
 4. `python discord_bot.py` — leave it running during/after your meeting.
 
