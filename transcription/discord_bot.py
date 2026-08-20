@@ -77,6 +77,24 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
+# Slash commands registered globally (the default) can take up to an hour for
+# Discord to propagate to clients — confirmed the hard way: a newly-added command
+# parameter didn't show up in the Discord UI right after a bot restart. Setting
+# DISCORD_GUILD_ID scopes the command to one server instead, which syncs
+# instantly — worth doing for a single-server bot like this one regardless of
+# the propagation-delay issue, since it also makes future command changes
+# immediately testable.
+_raw_guild_id = os.environ.get("DISCORD_GUILD_ID")
+try:
+    GUILD_OBJECT = discord.Object(id=int(_raw_guild_id)) if _raw_guild_id else None
+except ValueError:
+    print(
+        f"WARNING: DISCORD_GUILD_ID='{_raw_guild_id}' is not a valid integer — "
+        f"ignoring it and falling back to a slow global command sync.",
+        file=sys.stderr,
+    )
+    GUILD_OBJECT = None
+
 
 # Discord's hard cap on a message's content is 2000 chars. Truncate anything
 # dynamic (error messages, subprocess output) before sending — confirmed the hard
@@ -105,7 +123,7 @@ def check_config() -> None:
         sys.exit(1)
 
 
-@tree.command(name="meetingnotes", description="Turn a Craig recording link into meeting notes")
+@tree.command(name="meetingnotes", description="Turn a Craig recording link into meeting notes", guild=GUILD_OBJECT)
 @app_commands.describe(
     url="The recording link Craig gave you (from /join's response or DM)",
     notes="Optional: your own rough notes for this meeting (.txt), used to ground the "
@@ -237,8 +255,20 @@ async def run_pipeline(recording_dir: Path, notes_file_override: Path | None = N
 
 @client.event
 async def on_ready():
-    await tree.sync()
-    print(f"Logged in as {client.user}. Slash command /meetingnotes is ready.")
+    if GUILD_OBJECT is not None:
+        # Clean up any stale GLOBAL registration from before DISCORD_GUILD_ID was set —
+        # otherwise Discord may show a duplicate, outdated /meetingnotes for a while.
+        tree.clear_commands(guild=None)
+        await tree.sync()
+        await tree.sync(guild=GUILD_OBJECT)
+        print(f"Logged in as {client.user}. Slash command /meetingnotes synced to guild {GUILD_OBJECT.id} (instant).")
+    else:
+        await tree.sync()
+        print(
+            f"Logged in as {client.user}. Slash command /meetingnotes synced GLOBALLY — "
+            f"this can take up to an hour to show up in Discord. Set DISCORD_GUILD_ID in "
+            f".env for instant sync to one server instead."
+        )
 
 
 def main() -> None:

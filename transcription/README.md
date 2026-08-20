@@ -462,10 +462,19 @@ So the real workflow is:
 2. Add to `transcription/.env`:
    ```
    DISCORD_BOT_TOKEN=your-bot-token-here
+   DISCORD_GUILD_ID=your-server-id-here
    CRAIG_NAME_MAP=discord_username1=Real Name1,discord_username2=Real Name2
    MEETING_NOTES_FILE=C:\path\to\your_rough_notes.txt
    ```
-   The last two are optional but recommended. `CRAIG_NAME_MAP` matches
+   **Set `DISCORD_GUILD_ID`** — strongly recommended, not just optional.
+   Slash commands sync **globally** by default, which Discord can take up
+   to an hour to actually show in the UI after each bot restart (confirmed
+   the hard way: a newly-added command parameter didn't appear right
+   away). Setting your server's ID makes every command update instant
+   instead. To get it: enable Developer Mode in Discord (User Settings →
+   Advanced), then right-click your server's icon → Copy Server ID.
+
+   The other two are optional but recommended. `CRAIG_NAME_MAP` matches
    `pipeline.py`'s `--name-map` flag, set once instead of typed into
    Discord each time; the bot also automatically derives `--participants`
    from its real-name side and passes both to the summarization step —
@@ -511,12 +520,18 @@ reconstructed from source:
   parsing, error handling) was separately verified end-to-end with a real
   test recording.
 
-One real bug this testing did catch and fix: error messages that embed a
-raw API response (used when Craig rejects a request) had no length limit,
-which could itself exceed Discord's message-length limit and produce a
-confusing secondary "400 Bad Request" from Discord instead of the actual
-underlying error. Both `craig_client.py` (`_preview()`) and
-`discord_bot.py` (`send_safe()`) now truncate before sending.
+Two real issues live usage caught and fixed:
+- Error messages that embed a raw API response (used when Craig rejects a
+  request) had no length limit, which could itself exceed Discord's
+  message-length limit and produce a confusing secondary "400 Bad
+  Request" from Discord instead of the actual underlying error. Both
+  `craig_client.py` (`_preview()`) and `discord_bot.py` (`send_safe()`)
+  now truncate before sending.
+- A newly-added command parameter didn't show up in Discord's UI after a
+  bot restart — turned out to be global slash-command sync, which Discord
+  can take up to an hour to propagate. `DISCORD_GUILD_ID` (see Setup
+  above) fixes this by scoping the command to one server for instant
+  sync instead.
 
 Also worth knowing: `discord_bot.py` deliberately shells out to
 `pipeline.py` as a **separate process** rather than importing its
