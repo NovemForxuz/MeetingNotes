@@ -421,15 +421,22 @@ manual step that can't be automated away for free (see below for why).
 
 Craig has no public API for third-party bots, and it deliberately keeps a
 recording's `id`+`key` private — DMed to whoever ran `/join` (or shown
-only to them as a fallback if the DM fails). This was confirmed by reading
-Craig's own open-source code directly
-([CraigChat/craig](https://github.com/CraigChat/craig)), not from any
-public docs (there aren't any for this). No workaround exists — a bot
+only to them as a fallback if the DM fails). No workaround exists — a bot
 cannot start someone else's recording or intercept that private link. The
-one thing Craig does expose, also confirmed the same way, is a real,
-scriptable download API (`/api/recording/:id?key=...` for metadata,
-`/cook` to transcode into per-speaker FLAC, then a `/dl/<file>` route for
-the bytes) — that's what `craig_client.py` automates.
+one thing Craig does expose is a real, scriptable download API — confirmed
+by making actual requests against a real recording (`https://craig.horse`,
+`/api/v1/recordings/:id` for metadata, `/job` to trigger cooking into
+per-speaker FLAC and poll status, `/dl/<file>` for the bytes) — that's
+what `craig_client.py` automates.
+
+(An earlier version of this section, and of `craig_client.py`, was built
+by reading Craig's public GitHub source instead of testing live — that
+turned out to be a stale/legacy snapshot: the real API lives on a
+different domain entirely and has a different, versioned shape than the
+public repo. Every request below has since been verified against a real
+recording; noting this so the lesson isn't lost — for an undocumented
+API, read-the-source is a starting hypothesis, not a substitute for a
+live request.)
 
 So the real workflow is:
 
@@ -466,19 +473,28 @@ done. Expect it to take roughly as long as running `pipeline.py` manually
 on the same recording (see "Multi-track transcription (Craig)" above for
 real timing) — this is not fast, it's just hands-off.
 
-### What's confirmed vs. what isn't yet
+### What's confirmed
 
-The Craig API integration (`craig_client.py`) was built by reading Craig's
-route handlers directly, not by testing against a live recording — the
-exact request/response shapes for `/cook` and `/dl/` are my best
-reconstruction from source, not a proven-working path yet. The subprocess
-wiring to `pipeline.py` (argument passing, output parsing, error handling)
-**was** verified end-to-end with a real (synthetic) test recording before
-this was written up. **Treat your first real `/meetingnotes` run as a live
-test of the Craig API piece specifically** — if `craig_client.py` doesn't
-match Craig's actual behavior, the bot will report a clear error (it's
-written to surface Craig's raw API response on failure) rather than fail
-silently, but it hasn't been proven against the real thing yet.
+Both halves of this are now verified against real data, not just
+reconstructed from source:
+
+- **`craig_client.py`** — every request (recording metadata, triggering a
+  cook job, polling `running` → `complete`, and the final `/dl/` download)
+  was run for real against a live recording. Confirmed: the downloaded
+  zip's size matched the job's reported `outputSize` exactly, and it
+  extracted into the same `<track#>-<username>.flac` + `info.txt`
+  structure `transcribe_multitrack.py` already expects — verified by
+  actually running `find_tracks()` against the real extracted result.
+- **The subprocess wiring to `pipeline.py`** (argument passing, output
+  parsing, error handling) was separately verified end-to-end with a real
+  test recording.
+
+One real bug this testing did catch and fix: error messages that embed a
+raw API response (used when Craig rejects a request) had no length limit,
+which could itself exceed Discord's message-length limit and produce a
+confusing secondary "400 Bad Request" from Discord instead of the actual
+underlying error. Both `craig_client.py` (`_preview()`) and
+`discord_bot.py` (`send_safe()`) now truncate before sending.
 
 Also worth knowing: `discord_bot.py` deliberately shells out to
 `pipeline.py` as a **separate process** rather than importing its

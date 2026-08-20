@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-craig_client.py — minimal async client for Craig's (craig.chat) recording
+craig_client.py — minimal async client for Craig's (craig.horse) recording
 download API.
 
-This API is undocumented publicly. Everything here was reverse-engineered
-by reading Craig's own open-source code directly
-(https://github.com/CraigChat/craig — apps/download/api and apps/download/page),
-not from any published API docs, because none exist. It has NOT been
-exercised against a real live recording yet — only verified by reading the
-source. Treat the first real run as a live test, not a proven path; if
-something doesn't match reality, the error messages here are written to
-surface the raw response so a mismatch is debuggable rather than mysterious.
+This API is undocumented publicly. Confirmed by making REAL requests
+against a real Craig recording (not just reading source — an earlier
+version of this file was built by reading Craig's open-source repo, which
+turned out to be a stale/legacy snapshot that didn't match what's actually
+deployed; that version's requests 404'd in real testing). Everything below
+was verified working end-to-end against a live recording: base URL,
+request/response shapes, the full running -> complete job transition, and
+the final file download.
 
 Important, deliberate limitation: Craig keeps a recording's id+key private
 by design — DMed to whoever ran /join (or shown only to them as a fallback
@@ -18,19 +18,24 @@ if the DM fails). There is no way to obtain these automatically. This
 client picks up from a URL/id+key a human already has (see
 parse_recording_url()) and automates everything after that.
 
-How a recording is fetched (confirmed by reading the source):
-    1. GET  /api/recording/:id?key=...       -> recording metadata (used
-       here just to fail fast with a clear error if the id/key are wrong)
-    2. POST /api/recording/:id/cook?key=...  -> starts an async "cook"
-       (transcode) job. Left at Craig's own defaults (format=flac,
-       container=zip) deliberately — that's exactly the per-speaker FLAC
-       zip structure transcribe_multitrack.py already expects, no new
-       parsing needed.
-    3. GET  /api/recording/:id/cook?key=...  -> poll job status:
-       {ok, ready, download}. download.file is a filename once ready.
-    4. GET  https://craig.chat/dl/<file>     -> the actual zip bytes.
-       This is NOT under /api/ — a separate static-file route, confirmed
-       from the page's own download-button handler.
+How a recording is fetched (confirmed against a real recording):
+    1. GET  /api/v1/recordings/:id?key=...      -> {"recording": {...},
+       "users": [...], "live": bool}. Used here just to fail fast with a
+       clear error if the id/key are wrong, before triggering a job.
+    2. POST /api/v1/recordings/:id/job?key=...  body:
+       {"type": "recording", "options": {"format": "flac", "container": "zip"}}
+       -> starts an async "job". format=flac/container=zip is deliberate,
+       not Craig's default (there is no clear default here) — it's exactly
+       the per-speaker FLAC zip structure transcribe_multitrack.py expects.
+    3. GET  /api/v1/recordings/:id/job?key=...  -> poll:
+       {"job": {"status": "running"|"complete"|..., "outputFileName": "...",
+       ...}}. outputFileName appears immediately, even mid-job — status
+       must reach "complete" before the file is actually ready, confirmed
+       by polling a real job through its full running -> complete
+       transition (encoding per track, then finalizing, then complete).
+    4. GET  https://craig.horse/dl/<outputFileName>  -> the actual zip
+       bytes. Confirmed: content-length matches the job's reported
+       outputSize exactly.
 """
 
 import asyncio
@@ -40,20 +45,42 @@ from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
-BASE_URL = "https://craig.chat"
+BASE_URL = "https://craig.horse"
 POLL_INTERVAL_SECONDS = 5
-# Cooking a long multi-track recording into FLAC can take a while; generous timeout.
+# A real 5-track, ~31-minute recording completed in well under a minute
+# server-side; generous timeout regardless in case of a much longer meeting.
 POLL_TIMEOUT_SECONDS = 900
+
+# Job statuses observed in testing: "running" while in progress, "complete"
+# when done. Treated as an allowlist rather than just checking != "running",
+# so an unrecognized status fails loudly instead of polling forever.
+JOB_STATUS_COMPLETE = "complete"
+JOB_STATUS_RUNNING = "running"
+JOB_STATUS_ERROR_VALUES = {"error", "failed"}
 
 
 class CraigError(Exception):
     """Any Craig API failure. Message is written to be safe/useful to show the user."""
 
 
+# Cap on how much of a raw API response gets embedded in an error message. An
+# unbounded dump (e.g. of a full HTML error page when a request hits the wrong
+# domain/path) is enough to blow past Discord's message-length limit and cause a
+# confusing secondary failure that masks the real error — confirmed the hard way.
+RESPONSE_PREVIEW_LIMIT = 400
+
+
+def _preview(data) -> str:
+    text = str(data)
+    if len(text) > RESPONSE_PREVIEW_LIMIT:
+        return text[:RESPONSE_PREVIEW_LIMIT] + "... (truncated)"
+    return text
+
+
 def parse_recording_url(url_or_id: str, key: str | None = None) -> tuple:
     """
     Accept either a full Craig recording URL
-    (https://craig.chat/rec/<id>?key=<key>, as Craig DMs/shows the user)
+    (https://craig.horse/rec/<id>?key=<key>, as Craig DMs/shows the user)
     or a bare recording id with a separately-supplied key.
 
     Returns (id, key). Raises CraigError with a user-facing message if the
@@ -80,58 +107,69 @@ def parse_recording_url(url_or_id: str, key: str | None = None) -> tuple:
     return text, key
 
 
-async def fetch_recording_info(session: aiohttp.ClientSession, rec_id: str, key: str) -> dict:
-    """Fail fast with a clear error if the id/key are wrong, before triggering a cook job."""
-    async with session.get(f"{BASE_URL}/api/recording/{rec_id}", params={"key": key}) as resp:
+async def _get_json(session: aiohttp.ClientSession, url: str, **kwargs) -> tuple:
+    """GET url, returning (status, parsed_json_or_raw_text_fallback)."""
+    async with session.get(url, **kwargs) as resp:
         try:
-            data = await resp.json()
+            return resp.status, await resp.json()
         except aiohttp.ContentTypeError:
-            data = {"raw": await resp.text()}
-        if resp.status != 200 or not data.get("ok"):
-            raise CraigError(
-                f"Craig rejected that recording ID/key (HTTP {resp.status}). This usually "
-                f"means the link has expired (Craig keeps recordings 7 days) or was typed "
-                f"wrong. Raw response: {data}"
-            )
-        return data.get("info", {})
+            return resp.status, {"raw": await resp.text()}
 
 
-async def start_cook(session: aiohttp.ClientSession, rec_id: str, key: str) -> None:
+async def fetch_recording_info(session: aiohttp.ClientSession, rec_id: str, key: str) -> dict:
+    """Fail fast with a clear error if the id/key are wrong, before triggering a job."""
+    status, data = await _get_json(session, f"{BASE_URL}/api/v1/recordings/{rec_id}", params={"key": key})
+    if status != 200 or "recording" not in data:
+        raise CraigError(
+            f"Craig rejected that recording ID/key (HTTP {status}). This usually means "
+            f"the link has expired (Craig keeps recordings 7 days) or was typed wrong. "
+            f"Raw response: {_preview(data)}"
+        )
+    return data
+
+
+async def start_job(session: aiohttp.ClientSession, rec_id: str, key: str) -> None:
     async with session.post(
-        f"{BASE_URL}/api/recording/{rec_id}/cook",
+        f"{BASE_URL}/api/v1/recordings/{rec_id}/job",
         params={"key": key},
-        json={"format": "flac", "container": "zip", "dynaudnorm": False},
+        json={"type": "recording", "options": {"format": "flac", "container": "zip"}},
     ) as resp:
         try:
             data = await resp.json()
         except aiohttp.ContentTypeError:
             data = {"raw": await resp.text()}
-        if resp.status != 200 or not data.get("ok"):
+        if resp.status != 200 or "job" not in data:
             raise CraigError(
                 f"Craig refused to start cooking the recording (HTTP {resp.status}). "
-                f"Raw response: {data}"
+                f"Raw response: {_preview(data)}"
             )
 
 
-async def wait_for_cook(session: aiohttp.ClientSession, rec_id: str, key: str) -> str:
-    """Poll until the cook job is ready. Returns the filename to download."""
+async def wait_for_job(session: aiohttp.ClientSession, rec_id: str, key: str) -> str:
+    """Poll until the job reaches status 'complete'. Returns the output filename."""
     elapsed = 0
     while elapsed < POLL_TIMEOUT_SECONDS:
-        async with session.get(f"{BASE_URL}/api/recording/{rec_id}/cook", params={"key": key}) as resp:
-            try:
-                data = await resp.json()
-            except aiohttp.ContentTypeError:
-                data = {"raw": await resp.text()}
-            if resp.status != 200 or not data.get("ok"):
-                raise CraigError(
-                    f"Craig reported an error while cooking (HTTP {resp.status}). "
-                    f"Raw response: {data}"
-                )
-            if data.get("ready"):
-                filename = (data.get("download") or {}).get("file")
-                if not filename:
-                    raise CraigError(f"Craig said the cook job is ready but gave no filename: {data}")
-                return filename
+        status_code, data = await _get_json(
+            session, f"{BASE_URL}/api/v1/recordings/{rec_id}/job", params={"key": key}
+        )
+        job = data.get("job") if isinstance(data, dict) else None
+        if status_code != 200 or job is None:
+            raise CraigError(
+                f"Craig reported an error while cooking (HTTP {status_code}). "
+                f"Raw response: {_preview(data)}"
+            )
+
+        job_status = job.get("status")
+        if job_status in JOB_STATUS_ERROR_VALUES:
+            raise CraigError(f"Craig's cook job failed (status={job_status}): {_preview(job)}")
+        if job_status == JOB_STATUS_COMPLETE:
+            filename = job.get("outputFileName")
+            if not filename:
+                raise CraigError(f"Job is complete but Craig gave no output filename: {_preview(job)}")
+            return filename
+        if job_status != JOB_STATUS_RUNNING:
+            raise CraigError(f"Unrecognized job status from Craig: {_preview(job)}")
+
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
         elapsed += POLL_INTERVAL_SECONDS
     raise CraigError(
@@ -167,8 +205,8 @@ async def fetch_and_extract_recording(url_or_id: str, dest_dir: Path, key: str |
     rec_id, rec_key = parse_recording_url(url_or_id, key)
     async with aiohttp.ClientSession() as session:
         await fetch_recording_info(session, rec_id, rec_key)
-        await start_cook(session, rec_id, rec_key)
-        filename = await wait_for_cook(session, rec_id, rec_key)
+        await start_job(session, rec_id, rec_key)
+        filename = await wait_for_job(session, rec_id, rec_key)
         zip_path = dest_dir.parent / f"_craig_{rec_id}.zip"
         await download_cooked_file(session, filename, zip_path)
         extract_craig_zip(zip_path, dest_dir)

@@ -13,7 +13,7 @@ scripts.
 | Component | What it is | Status |
 |---|---|---|
 | [`transcription/`](transcription/) | Local Whisper transcription + OpenAI summarization pipeline | Working MVP — see testing below |
-| Discord bot integration | Paste a Craig recording link in Discord, get notes posted back automatically | Built (`discord_bot.py`), Craig API integration not yet proven against a real live recording — see `transcription/README.md` "Discord bot" section |
+| Discord bot integration | Paste a Craig recording link in Discord, get notes posted back automatically | Working — `craig_client.py` verified against a real live recording end-to-end (see `transcription/README.md` "Discord bot" section); a live `/meetingnotes` run through Discord itself is still worth doing as final confirmation |
 | Speaker diarization | Distinguishing who said what | Solved for [Craig](https://craig.chat/) recordings via `transcribe_multitrack.py` (per-speaker tracks, no guessing needed); a single mixed-down file still relies on `transcribe.py`'s attribution heuristics |
 
 ## Repo structure
@@ -103,14 +103,14 @@ filtering was needed here.
 **5. Discord bot** — paste a Craig recording link into `/meetingnotes` and
 get notes posted back in-channel automatically. Full setup (creating the
 bot, permissions, `.env` config) is in `transcription/README.md`
-"Discord bot". **Not yet tested against a real live Craig recording** —
-the Craig API integration was built by reading Craig's source directly
-(no public docs exist), and the subprocess/pipeline wiring was verified
-with a synthetic test, but treat your first real `/meetingnotes` run as
-a live test of the untested piece specifically.
+"Discord bot". `craig_client.py` (the Craig API integration) has been
+verified end-to-end against a real live recording — see that section for
+what was tested and a real bug it caught (an unbounded error message
+tripping Discord's own length limit).
 
 ## Next steps
 
-1. Run a real `/meetingnotes` test against an actual Craig recording to
-   validate `craig_client.py` for real — the one piece not yet proven
-   against live Craig behavior.
+1. Run a real `/meetingnotes` command through Discord itself as final
+   confirmation — `craig_client.py` is verified via direct API calls, but
+   hasn't yet been exercised through the bot's actual Discord interaction
+   flow.

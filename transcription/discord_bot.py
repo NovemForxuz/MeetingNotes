@@ -76,6 +76,21 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 
+# Discord's hard cap on a message's content is 2000 chars. Truncate anything
+# dynamic (error messages, subprocess output) before sending — confirmed the hard
+# way: an untruncated Craig API error response caused Discord itself to reject the
+# message (400, "Must be 4000 or fewer in length" — that number is Discord's total
+# request-body cap, not the per-field content limit, but the fix is the same:
+# never send unbounded dynamic text as message content).
+DISCORD_MESSAGE_LIMIT = 1900  # a bit under 2000 for safety margin
+
+
+async def send_safe(channel, content: str, **kwargs) -> None:
+    if len(content) > DISCORD_MESSAGE_LIMIT:
+        content = content[: DISCORD_MESSAGE_LIMIT - 20] + "\n... (truncated)"
+    await channel.send(content, **kwargs)
+
+
 def check_config() -> None:
     if not BOT_TOKEN:
         print(
@@ -109,7 +124,7 @@ async def process_recording(url: str, channel) -> None:
         try:
             recording_dir = await craig_client.fetch_and_extract_recording(url, job_dir)
         except craig_client.CraigError as exc:
-            await channel.send(f"❌ Couldn't fetch the recording from Craig: {exc}")
+            await send_safe(channel, f"❌ Couldn't fetch the recording from Craig: {exc}")
             return
 
         await channel.send("Step 2/2: transcribing + summarizing (this is the slow part)...")
@@ -117,8 +132,8 @@ async def process_recording(url: str, channel) -> None:
 
         if returncode != 0:
             tail = "\n".join(stdout_text.splitlines()[-25:])
-            await channel.send(
-                f"❌ Pipeline failed (exit code {returncode}). Last output:\n```\n{tail}\n```"
+            await send_safe(
+                channel, f"❌ Pipeline failed (exit code {returncode}). Last output:\n```\n{tail}\n```"
             )
             return
 
@@ -132,7 +147,7 @@ async def process_recording(url: str, channel) -> None:
 
         notes_path = Path(notes_match.group(1).strip())
         if not notes_path.exists():
-            await channel.send(f"⚠️ Pipeline reported notes at `{notes_path}` but that file doesn't exist.")
+            await send_safe(channel, f"⚠️ Pipeline reported notes at `{notes_path}` but that file doesn't exist.")
             return
 
         await channel.send(
@@ -143,7 +158,7 @@ async def process_recording(url: str, channel) -> None:
         # we've succeeded. Left in place on any failure path above, for debugging.
         cleanup_job_dir(job_dir)
     except Exception as exc:  # noqa: BLE001 - last resort: report, don't let the bot process die
-        await channel.send(f"❌ Unexpected error processing that recording: {exc}")
+        await send_safe(channel, f"❌ Unexpected error processing that recording: {exc}")
 
 
 def cleanup_job_dir(job_dir: Path) -> None:
