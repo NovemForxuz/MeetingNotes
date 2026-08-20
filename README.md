@@ -6,14 +6,13 @@ and turn it into structured meeting notes automatically.
 
 ## Status
 
-This is early-stage. What exists today are the two MVP building blocks,
-built and tested independently — the Discord bot that would trigger them
-automatically doesn't exist yet.
+This is early-stage, and Python-only — an earlier ASP.NET Web API scaffold
+that lived here was dropped as unused; the pipeline runs entirely as CLI
+scripts.
 
 | Component | What it is | Status |
 |---|---|---|
 | [`transcription/`](transcription/) | Local Whisper transcription + OpenAI summarization pipeline | Working MVP — see testing below |
-| [`MeetingNotes.Api/`](MeetingNotes.Api/) | ASP.NET Core Web API scaffold | Default template scaffold only, not yet wired to the pipeline |
 | Discord bot integration | Watches a voice channel, records, triggers the pipeline | Not started |
 | Speaker diarization | Distinguishing who said what | Solved for [Craig](https://craig.chat/) recordings via `transcribe_multitrack.py` (per-speaker tracks, no guessing needed); a single mixed-down file still relies on `transcribe.py`'s attribution heuristics |
 
@@ -21,15 +20,14 @@ automatically doesn't exist yet.
 
 ```
 MeetingNotes/
-├── transcription/              # Python: audio -> transcript -> structured notes
-│   ├── transcribe.py           # local Whisper transcription, single file (offline)
-│   ├── transcribe_multitrack.py # local Whisper transcription, Craig multi-track export (offline)
-│   ├── summarize.py            # transcript -> Markdown notes (OpenAI API)
-│   ├── pipeline.py             # auto-detects file vs. Craig folder, then chains transcription + summarize.py
-│   ├── input/                   # drop recordings here (gitignored); scripts auto-pick if path omitted
-│   ├── output/                  # timestamped transcripts/notes land here (gitignored)
-│   └── README.md               # full setup/usage/troubleshooting details
-└── MeetingNotes.Api/           # ASP.NET Core Web API scaffold
+└── transcription/              # Python: audio -> transcript -> structured notes
+    ├── transcribe.py           # local Whisper transcription, single file (offline)
+    ├── transcribe_multitrack.py # local Whisper transcription, Craig multi-track export (offline)
+    ├── summarize.py            # transcript -> Markdown notes (OpenAI API)
+    ├── pipeline.py             # auto-detects file vs. Craig folder, then chains transcription + summarize.py
+    ├── input/                   # drop recordings here (gitignored); scripts auto-pick if path omitted
+    ├── output/                  # timestamped transcripts/notes land here (gitignored)
+    └── README.md               # full setup/usage/troubleshooting details
 ```
 
 ## Testing
@@ -100,32 +98,7 @@ as a single-file run (N = number of tracks) — see
 `transcription/README.md` for real timing and why extra hallucination
 filtering was needed here.
 
-### `MeetingNotes.Api/` — the scaffold
-
-This is currently the unmodified `dotnet new webapi -controllers` template,
-not yet connected to the transcription pipeline.
-
-```bash
-cd MeetingNotes.Api
-dotnet run
-```
-
-Expect console output ending in `Now listening on: http://localhost:5129`
-(or similar). To confirm it's actually serving requests:
-
-```bash
-curl http://localhost:5129/openapi/v1.json
-curl http://localhost:5129/WeatherForecast
-```
-
-Both should return `200` with JSON bodies. Note: this .NET version doesn't
-ship a browsable Swagger UI page by default (only the raw OpenAPI JSON at
-`/openapi/v1.json`) — `/swagger` will 404 unless Swashbuckle is added
-separately.
-
 ## Next steps
 
 1. Build the Discord bot: watch a voice channel, record with Craig
    (multi-track), trigger `pipeline.py` automatically when the call ends.
-2. Wire `MeetingNotes.Api` to the transcription pipeline (or decide it's
-   not needed if the pipeline stays a standalone script/bot).
