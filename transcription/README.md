@@ -465,27 +465,35 @@ So the real workflow is:
    CRAIG_NAME_MAP=discord_username1=Real Name1,discord_username2=Real Name2
    MEETING_NOTES_FILE=C:\path\to\your_rough_notes.txt
    ```
-   The last two are optional but recommended — same purpose as
-   `pipeline.py`'s `--name-map`/`--notes-file` flags, just set once instead
-   of typed into Discord each time. If `CRAIG_NAME_MAP` is set, the bot
-   also automatically derives `--participants` from its real-name side and
-   passes both to the summarization step — confirmed in testing that
-   relabeling the transcript alone isn't always enough on its own; without
-   `CRAIG_NAME_MAP` set, a real run split two people into duplicate
-   identities (e.g. "Madooshik95" and "Aaron" shown as separate people in
-   Discussion, when they're the same speaker) because the summarizer had
-   no way to link a raw Discord username to a name mentioned elsewhere in
-   context.
+   The last two are optional but recommended. `CRAIG_NAME_MAP` matches
+   `pipeline.py`'s `--name-map` flag, set once instead of typed into
+   Discord each time; the bot also automatically derives `--participants`
+   from its real-name side and passes both to the summarization step —
+   confirmed in testing that relabeling the transcript alone isn't always
+   enough on its own; without `CRAIG_NAME_MAP` set, a real run split two
+   people into duplicate identities (e.g. "Madooshik95" and "Aaron" shown
+   as separate people in Discussion, when they're the same speaker)
+   because the summarizer had no way to link a raw Discord username to a
+   name mentioned elsewhere in context. `MEETING_NOTES_FILE` is a
+   **fallback default** for `--notes-file` — since your rough notes are
+   usually different each meeting, prefer attaching them per-meeting via
+   `/meetingnotes`'s optional `notes` parameter instead (see Usage below);
+   only set this if you want a default to fall back on when you forget.
 3. `pip install -r requirements.txt` (adds `discord.py`, `aiohttp`).
 4. `python discord_bot.py` — leave it running during/after your meeting.
 
 ### Usage
 
-In Discord: `/meetingnotes url:<the link Craig gave you>`. The bot acks
-immediately, then posts progress updates and finally the notes file once
-done. Expect it to take roughly as long as running `pipeline.py` manually
-on the same recording (see "Multi-track transcription (Craig)" above for
-real timing) — this is not fast, it's just hands-off.
+In Discord: `/meetingnotes url:<the link Craig gave you>`, optionally
+attaching a `.txt` of your own rough notes for that meeting via the
+`notes` parameter — `/meetingnotes url:<link> notes:<attach file>`. If
+you skip `notes`, it falls back to `MEETING_NOTES_FILE` from `.env`; a
+per-meeting attachment always takes priority over that static default.
+The bot acks immediately, then posts progress updates and finally the
+notes file once done. Expect it to take roughly as long as running
+`pipeline.py` manually on the same recording (see "Multi-track
+transcription (Craig)" above for real timing) — this is not fast, it's
+just hands-off.
 
 ### What's confirmed
 

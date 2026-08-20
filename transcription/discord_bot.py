@@ -11,7 +11,9 @@ craig_client.py's docstring for how this was confirmed). So the real-world
 flow is:
 
     1. You run /join and /stop in Discord, same as ever.
-    2. You paste the recording link Craig gives you into /meetingnotes.
+    2. You paste the recording link Craig gives you into /meetingnotes,
+       optionally attaching your own rough notes for that meeting too
+       (falls back to MEETING_NOTES_FILE from .env if you don't).
     3. Everything else is automatic: cook the recording into per-speaker
        FLAC via Craig's own API, download, extract, run the full
        transcription + three-pass summarization pipeline, and post the
@@ -104,8 +106,12 @@ def check_config() -> None:
 
 
 @tree.command(name="meetingnotes", description="Turn a Craig recording link into meeting notes")
-@app_commands.describe(url="The recording link Craig gave you (from /join's response or DM)")
-async def meetingnotes(interaction: discord.Interaction, url: str):
+@app_commands.describe(
+    url="The recording link Craig gave you (from /join's response or DM)",
+    notes="Optional: your own rough notes for this meeting (.txt), used to ground the "
+    "summary. Falls back to MEETING_NOTES_FILE from .env if you skip this.",
+)
+async def meetingnotes(interaction: discord.Interaction, url: str, notes: discord.Attachment | None = None):
     await interaction.response.send_message(
         f"Got it — processing that recording now. This can take a while (roughly "
         f"N × a few minutes, N = number of speakers, plus summarization). I'll post "
@@ -114,12 +120,19 @@ async def meetingnotes(interaction: discord.Interaction, url: str):
     channel = interaction.channel
     # Fire-and-forget: the interaction token isn't valid for the ~40+ min this can take,
     # so all further communication uses plain channel messages, not interaction followups.
-    asyncio.create_task(process_recording(url, channel))
+    asyncio.create_task(process_recording(url, channel, notes))
 
 
-async def process_recording(url: str, channel) -> None:
+async def process_recording(url: str, channel, notes_attachment=None) -> None:
     job_dir = BOT_WORK_DIR / f"job_{transcribe.make_timestamp()}"
     try:
+        notes_file_override = None
+        if notes_attachment is not None:
+            job_dir.mkdir(parents=True, exist_ok=True)
+            notes_file_override = job_dir / notes_attachment.filename
+            await notes_attachment.save(notes_file_override)
+            await channel.send(f"Using your attached notes ({notes_attachment.filename}) for this meeting.")
+
         await channel.send("Step 1/2: fetching and cooking the recording from Craig...")
         try:
             recording_dir = await craig_client.fetch_and_extract_recording(url, job_dir)
@@ -128,7 +141,7 @@ async def process_recording(url: str, channel) -> None:
             return
 
         await channel.send("Step 2/2: transcribing + summarizing (this is the slow part)...")
-        stdout_text, returncode = await run_pipeline(recording_dir)
+        stdout_text, returncode = await run_pipeline(recording_dir, notes_file_override)
 
         if returncode != 0:
             tail = "\n".join(stdout_text.splitlines()[-25:])
@@ -186,8 +199,13 @@ def participants_from_name_map(name_map: str | None) -> str | None:
     return ", ".join(names) if names else None
 
 
-async def run_pipeline(recording_dir: Path) -> tuple:
-    """Run pipeline.py as a subprocess against recording_dir. Returns (stdout+stderr, returncode)."""
+async def run_pipeline(recording_dir: Path, notes_file_override: Path | None = None) -> tuple:
+    """
+    Run pipeline.py as a subprocess against recording_dir. Returns (stdout+stderr, returncode).
+
+    notes_file_override: a per-meeting notes file (from /meetingnotes' optional
+    attachment) takes priority over the static MEETING_NOTES_FILE from .env.
+    """
     args = [
         sys.executable,
         str(PIPELINE_SCRIPT),
@@ -202,8 +220,10 @@ async def run_pipeline(recording_dir: Path) -> tuple:
         participants = participants_from_name_map(DEFAULT_NAME_MAP)
         if participants:
             args += ["--participants", participants]
-    if DEFAULT_NOTES_FILE:
-        args += ["--notes-file", DEFAULT_NOTES_FILE]
+
+    notes_file = str(notes_file_override) if notes_file_override else DEFAULT_NOTES_FILE
+    if notes_file:
+        args += ["--notes-file", notes_file]
 
     process = await asyncio.create_subprocess_exec(
         *args,
